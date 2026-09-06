@@ -26,7 +26,7 @@
 
 - **Agent 系统**：基于 Eino ADK 的 `ChatModelAgent`（OpenAI 兼容），支持 Provider / MCP / Tool / Skill / Prompt / Plugin 多模块组合，工具调用在 ReAct 循环内同步完成
 - **异步并发处理**：`ConcurrencyManager` 控制每 ChatArea 最多 8 个 Agent goroutine 并发，事件经三阶段管线（Plugin 拦截 → 回复策略 → Agent 派发）高效分流
-- **相关性回复优化**：`relevance` 策略下 @/命令/提及名字必回、噪音消息规则过滤、候选消息批量合并为一次 LLM 判断，带 Redis 结果缓存/冷却、并发限流与刷屏自动降级，热聊场景判断开销降至原来的 ~1/10
+- **参与窗口群聊**：@/命令/提及名字/私聊必回，其余消息攒入参与窗口，安静间隔后整窗一次交给 Agent 参与（带随机静默/打字延迟，插话计数与最迟必发保证不冷场）
 - **四层记忆体系**：短期记忆（Redis 滑动窗口，默认 100 条，自动 Compact）/ 长期记忆（Postgres + 内存 LRU）/ 技能记忆（SkillMemory，Compact 时自动提取）/ 会话记录（Postgres 审计）
 - **OneBot11 反向 WebSocket 适配器**：与 QQ 机器人框架对接，OneBot11 API 作为 Agent 工具注册
 - **Lua 插件系统**：gopher-lua 驱动，支持多级命令、Lua SDK（带 LuaCATS 注解）、插件目录文本文件读写（`jn.file`）、系统插件保护

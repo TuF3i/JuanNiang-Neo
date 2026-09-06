@@ -6,102 +6,110 @@
     </div>
 
     <v-row>
-      <!-- 回复策略 -->
+      <!-- 参与窗口 -->
       <v-col cols="12" md="7">
         <v-card rounded="lg" elevation="1" class="h-100">
           <v-card-item>
-            <template #title><span class="text-h6 font-weight-bold">回复策略</span></template>
-            <template #subtitle>群聊/私聊消息路由方式</template>
+            <template #title><span class="text-h6 font-weight-bold">参与窗口</span></template>
+            <template #subtitle>群聊消息攒窗后整窗参与，不逐条回复</template>
           </v-card-item>
           <v-card-text>
             <v-form @submit.prevent="handleSave">
-              <!-- 回复策略已收敛为仅支持按相关性回复：@/命令/提及名字必回，其余由 LLM 判断 -->
               <v-alert type="info" variant="tonal" class="mb-4" density="comfortable">
-                <div class="text-subtitle-2 font-weight-bold">按相关性回复（当前唯一策略）</div>
+                <div class="text-subtitle-2 font-weight-bold">参与模式（当前唯一策略）</div>
                 <div class="text-caption">
-                  被@、触发插件命令或提及机器人名字时必回（规则快路径，不消耗 LLM 判断）；
-                  其余群聊消息由 LLM 按相关性分数决定是否回复，判断结果带 Redis 缓存与冷却。
+                  被@、触发插件命令或提及机器人名字时必回（立即回复，不攒窗）；其余群聊消息攒进窗口，
+                  等待「安静间隔」或攒够「插话计数」后，整窗一次交给 Agent，由 Agent 决定附和/接话或静默（__NO_REPLY__）。
                 </div>
               </v-alert>
-
-              <div class="text-subtitle-2 font-weight-bold mb-2">相关性阈值</div>
-              <div class="d-flex align-center" style="gap: 16px">
-                <v-slider
-                  v-model="form.relevance_threshold"
-                  :min="0" :max="1" :step="0.05"
-                  color="primary" thumb-label="always" hide-details style="flex: 1"
-                />
-                <v-text-field
-                  v-model.number="form.relevance_threshold"
-                  type="number" :min="0" :max="1" :step="0.05"
-                  density="compact" style="width: 90px" hide-details variant="outlined"
-                />
-              </div>
-              <div class="text-caption text-medium-emphasis mt-2">
-                Agent 判断消息相关性 &ge; 阈值时才会回复。被@时自动绕过此判断。
-                <br />当前阈值: {{ form.relevance_threshold.toFixed(2) }}
-              </div>
-
-              <v-divider class="my-3" />
 
               <div class="text-subtitle-2 font-weight-bold mb-2">机器人名字</div>
               <v-text-field
                 v-model="form.bot_name"
-                label="用于相关性判断，如「小卷」"
+                label="提及该名字即必回，如「小卷」"
                 placeholder="例如：小卷"
                 density="comfortable" variant="outlined" hide-details clearable
               />
 
               <v-divider class="my-3" />
 
-              <div class="text-subtitle-2 font-weight-bold mb-2">相关性检测模型</div>
-              <v-select
-                v-model="form.relevance_model"
-                :items="textModelOptions"
-                item-title="label"
-                item-value="value"
-                label="选择相关性判断使用的 Text 模型"
-                placeholder="（默认 Text 模型）"
-                density="comfortable" variant="outlined" clearable hide-details
-              />
-
-              <v-divider class="my-3" />
-
-              <div class="text-subtitle-2 font-weight-bold mb-2">相关性判断超时（秒）</div>
-              <v-text-field
-                v-model.number="form.relevance_timeout"
-                type="number" :min="1" :max="120"
-                label="相关性判断 LLM 调用总超时（含等待，默认 10s）"
-                density="comfortable" variant="outlined" hide-details
-              />
+              <div class="text-subtitle-2 font-weight-bold mb-2">安静间隔（秒）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.quiet_gap_seconds"
+                  :min="1" :max="30" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.quiet_gap_seconds"
+                  type="number" :min="1" :max="30"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
               <div class="text-caption text-medium-emphasis mt-1">
-                慢速提供商可调大到 15-30s；信号量等待与 LLM 调用共享该预算。
+                消息停止后等待这么久才释放窗口；窗口内每来一条新消息都会重置该计时。
               </div>
 
               <v-divider class="my-3" />
 
-              <div class="text-subtitle-2 font-weight-bold mb-2">判断失败策略</div>
-              <v-select
-                v-model="form.judge_fail_policy"
-                :items="[
-                  { label: '不回复 — 判断失败时保持沉默（默认）', value: 'drop' },
-                  { label: '照常回复 — 判断失败时交给 Agent 回复', value: 'reply' },
-                ]"
-                item-title="label"
-                item-value="value"
-                label="相关性判断 LLM 调用失败时的处理"
-                density="comfortable" variant="outlined" hide-details
-              />
+              <div class="text-subtitle-2 font-weight-bold mb-2">插话计数强发（条）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.force_count"
+                  :min="2" :max="20" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.force_count"
+                  type="number" :min="2" :max="20"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
               <div class="text-caption text-medium-emphasis mt-1">
-                LLM 接口超时/限流等瞬态故障时生效；未配置模型不算失败。
+                一直有人插话导致窗口无法安静释放时，攒够该条数后忽略定时器强制开口（保证不被冷落）。
+              </div>
+
+              <v-divider class="my-3" />
+
+              <div class="text-subtitle-2 font-weight-bold mb-2">最迟必发（秒）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.max_age_seconds"
+                  :min="5" :max="120" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.max_age_seconds"
+                  type="number" :min="5" :max="120"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">
+                窗口创建后最迟必发的硬上界；不参与随机，保证"攒的话必说出去"。
+              </div>
+
+              <v-divider class="my-3" />
+
+              <div class="text-subtitle-2 font-weight-bold mb-2">窗口消息数上限（条）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.window_max_msgs"
+                  :min="5" :max="50" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.window_max_msgs"
+                  type="number" :min="5" :max="50"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">
+                超限丢弃最旧消息保留最新，防止刷屏时上下文爆炸。
               </div>
 
               <div class="d-flex align-center" style="gap: 12px">
-                <v-btn type="submit" color="primary" variant="tonal" :loading="saving">
+                <v-btn type="submit" color="primary" variant="tonal" :loading="saving" :disabled="!loaded">
                   <v-icon class="me-1">mdi-content-save</v-icon> 保存
-                </v-btn>
-                <v-btn variant="tonal" color="info" @click="openPromptDialog">
-                  <v-icon class="me-1">mdi-text-box-edit-outline</v-icon> 自定义判断提示词
                 </v-btn>
               </div>
             </v-form>
@@ -109,8 +117,94 @@
         </v-card>
       </v-col>
 
-      <!-- 其他设置 -->
+      <!-- 随机性与其他设置 -->
       <v-col cols="12" md="5">
+        <v-card rounded="lg" elevation="1" class="h-100 mb-4">
+          <v-card-item>
+            <template #title><span class="text-h6 font-weight-bold">随机性</span></template>
+            <template #subtitle>让释放时机不那么"人机"；全部为 0/1 即确定性模式</template>
+          </v-card-item>
+          <v-card-text>
+            <v-form @submit.prevent="handleSave">
+              <div class="text-subtitle-2 font-weight-bold mb-2">释放时机抖动（秒）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.jitter_seconds"
+                  :min="0" :max="10" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.jitter_seconds"
+                  type="number" :min="0" :max="10"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">
+                安静间隔取「间隔 ± 0~抖动」随机值；0=关闭随机。只影响时机，不会推迟最迟必发。
+              </div>
+
+              <v-divider class="my-3" />
+
+              <div class="text-subtitle-2 font-weight-bold mb-2">计数抖动（条）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.force_count_jitter"
+                  :min="0" :max="5" :step="1"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.force_count_jitter"
+                  type="number" :min="0" :max="5"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">插话计数 ± 0~抖动，0=关闭。</div>
+
+              <v-divider class="my-3" />
+
+              <div class="text-subtitle-2 font-weight-bold mb-2">参与概率</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.participate_probability"
+                  :min="0" :max="1" :step="0.05"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.participate_probability"
+                  type="number" :min="0" :max="1" :step="0.05"
+                  density="compact" style="width: 90px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">
+                安静释放时以该概率真的参与，1-p 静默放弃本窗；插话计数强发与最迟必发不受影响。当前: {{ (Number(form.participate_probability) || 0).toFixed(2) }}
+              </div>
+
+              <v-divider class="my-3" />
+
+              <div class="text-subtitle-2 font-weight-bold mb-2">打字延迟上限（毫秒）</div>
+              <div class="d-flex align-center" style="gap: 16px">
+                <v-slider
+                  v-model.number="form.typing_delay_max_ms"
+                  :min="0" :max="5000" :step="100"
+                  color="primary" thumb-label="always" hide-details style="flex: 1"
+                />
+                <v-text-field
+                  v-model.number="form.typing_delay_max_ms"
+                  type="number" :min="0" :max="5000" :step="100"
+                  density="compact" style="width: 110px" hide-details variant="outlined"
+                />
+              </div>
+              <div class="text-caption text-medium-emphasis mt-1">
+                参与路径发送前随机等待 0~上限，模拟真人输入；0=关闭（必回路径不受影响）。
+              </div>
+
+              <v-btn type="submit" color="primary" variant="tonal" :loading="saving" :disabled="!loaded">
+                <v-icon class="me-1">mdi-content-save</v-icon> 保存
+              </v-btn>
+            </v-form>
+          </v-card-text>
+        </v-card>
+
         <v-card rounded="lg" elevation="1" class="h-100">
           <v-card-item>
             <template #title><span class="text-h6 font-weight-bold">其他设置</span></template>
@@ -118,7 +212,6 @@
           </v-card-item>
           <v-card-text>
             <v-form @submit.prevent="handleSave">
-              <!-- AgentLite -->
               <div class="d-flex align-start mb-4">
                 <div class="flex-grow-1 me-3">
                   <div class="text-subtitle-2 font-weight-bold">AgentLite 模式</div>
@@ -132,7 +225,6 @@
 
               <v-divider class="mb-4" />
 
-              <!-- Strip Markdown -->
               <div class="d-flex align-start mb-4">
                 <div class="flex-grow-1 me-3">
                   <div class="text-subtitle-2 font-weight-bold">去除 Markdown 格式</div>
@@ -143,7 +235,7 @@
                 <v-switch v-model="form.strip_markdown" color="primary" hide-details density="compact" />
               </div>
 
-              <v-btn type="submit" color="primary" variant="tonal" :loading="saving">
+              <v-btn type="submit" color="primary" variant="tonal" :loading="saving" :disabled="!loaded">
                 <v-icon class="me-1">mdi-content-save</v-icon> 保存
               </v-btn>
             </v-form>
@@ -151,116 +243,80 @@
         </v-card>
       </v-col>
     </v-row>
-    <!-- 自定义判断提示词弹窗 -->
-    <v-dialog v-model="promptDialog" max-width="720">
-      <v-card rounded="lg">
-        <v-card-title class="d-flex align-center justify-space-between pa-4">
-          <span>自定义判断提示词</span>
-          <v-btn icon="mdi-close" size="small" variant="text" @click="promptDialog = false" />
-        </v-card-title>
-        <v-divider />
-        <v-card-text class="pa-4">
-          <v-textarea
-            v-model="promptDraft"
-            label="留空使用默认规则；填写后替换默认的「回复规则」"
-            rows="8"
-            density="comfortable" variant="outlined"
-            placeholder="例如：&#10;- 只有直接@机器人或请求机器人办事的消息才算相关&#10;- 群友闲聊一律不回复（相关度 < 0.1）"
-          />
-          <div class="text-caption text-medium-emphasis">
-            自定义提示词将替换相关性判断的「回复规则」部分，消息上下文仍会自动附加。
-          </div>
-        </v-card-text>
-        <v-divider />
-        <v-card-actions class="pa-4">
-          <v-spacer />
-          <v-btn variant="text" @click="promptDialog = false">取消</v-btn>
-          <v-btn color="primary" variant="tonal" @click="savePrompt">保存</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useToastStore } from '@/stores/toast'
-import { replyStrategyApi, providerApi, type ProviderResp } from '@/api'
+import { replyStrategyApi } from '@/api'
 
 const toastStore = useToastStore()
 const saving = ref(false)
-const promptDialog = ref(false)
-const promptDraft = ref('')
+// loaded：回复设置是否已成功加载。加载失败时禁用保存，避免把默认表单值当成真实配置写回。
+const loaded = ref(false)
 
 const form = ref({
-  relevance_threshold: 0.5,
   bot_name: '',
   strip_markdown: false,
   agent_lite: false,
-  relevance_prompt: '',
-  relevance_model: '',
-  relevance_timeout: 10,
-  judge_fail_policy: 'drop',
+  quiet_gap_seconds: 5,
+  force_count: 5,
+  max_age_seconds: 20,
+  window_max_msgs: 20,
+  jitter_seconds: 2,
+  force_count_jitter: 1,
+  participate_probability: 0.8,
+  typing_delay_max_ms: 1500,
 })
-
-// 相关性检测可选的 Text 模型列表（仅 text_model 类型）
-const textModelOptions = ref<{ label: string; value: string }[]>([])
-
-async function loadModels() {
-  try {
-    const list = (await providerApi.list()).data.data || []
-    textModelOptions.value = list
-      .filter((p: ProviderResp) => p.type === 'text_model')
-      .map((p: ProviderResp) => ({ label: `${p.name} · ${p.model}`, value: p.id }))
-  } catch { /* ignore */ }
-}
 
 async function load() {
   try {
     const res = await replyStrategyApi.get()
     const d = (res.data as any)?.data
     if (d) {
-      form.value.relevance_threshold = d.relevance_threshold ?? 0.5
       form.value.bot_name = d.bot_name || ''
       form.value.strip_markdown = d.strip_markdown || false
       form.value.agent_lite = d.agent_lite || false
-      form.value.relevance_prompt = d.relevance_prompt || ''
-      form.value.relevance_model = d.relevance_model || ''
-      form.value.relevance_timeout = d.relevance_timeout || 10
-      form.value.judge_fail_policy = d.judge_fail_policy || 'drop'
+      form.value.quiet_gap_seconds = d.quiet_gap_seconds ?? 5
+      form.value.force_count = d.force_count ?? 5
+      form.value.max_age_seconds = d.max_age_seconds ?? 20
+      form.value.window_max_msgs = d.window_max_msgs ?? 20
+      form.value.jitter_seconds = d.jitter_seconds ?? 2
+      form.value.force_count_jitter = d.force_count_jitter ?? 1
+      form.value.participate_probability = d.participate_probability ?? 0.8
+      form.value.typing_delay_max_ms = d.typing_delay_max_ms ?? 1500
     }
-  } catch (_e: any) {}
-}
-
-function openPromptDialog() {
-  promptDraft.value = form.value.relevance_prompt
-  promptDialog.value = true
-}
-
-function savePrompt() {
-  form.value.relevance_prompt = promptDraft.value
-  promptDialog.value = false
-  toastStore.success('提示词已更新，点击「保存」生效')
+    loaded.value = true
+  } catch (e: any) {
+    loaded.value = false
+    toastStore.error(e?.response?.data?.info || e?.message || '加载回复设置失败')
+  }
 }
 
 async function handleSave() {
   saving.value = true
   try {
     await replyStrategyApi.update({
-      relevance_threshold: form.value.relevance_threshold,
       bot_name: form.value.bot_name,
       strip_markdown: form.value.strip_markdown,
       agent_lite: form.value.agent_lite,
-      relevance_prompt: form.value.relevance_prompt,
-      relevance_model: form.value.relevance_model,
-      relevance_timeout: form.value.relevance_timeout || 10,
-      judge_fail_policy: form.value.judge_fail_policy,
+      quiet_gap_seconds: form.value.quiet_gap_seconds || 5,
+      force_count: form.value.force_count || 5,
+      max_age_seconds: form.value.max_age_seconds || 20,
+      window_max_msgs: form.value.window_max_msgs || 20,
+      jitter_seconds: Number(form.value.jitter_seconds ?? 0),
+      force_count_jitter: Number(form.value.force_count_jitter ?? 0),
+      participate_probability: Number(form.value.participate_probability ?? 0),
+      typing_delay_max_ms: Number(form.value.typing_delay_max_ms ?? 0),
     })
     toastStore.success('回复设置已保存')
   } catch (e: any) {
     toastStore.error(e?.response?.data?.info || e?.message || '保存失败')
-  } finally { saving.value = false }
+  } finally {
+    saving.value = false
+  }
 }
 
-onMounted(() => { load(); loadModels() })
+onMounted(load)
 </script>

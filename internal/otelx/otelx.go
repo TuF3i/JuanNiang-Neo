@@ -91,6 +91,13 @@ func Span(ctx context.Context, name string, attrs ...attribute.KeyValue) (contex
 	return tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 }
 
+// NewRootSpan 创建独立根 span（不继承父级 trace）：用于参与窗口释放等
+// 定时器/异步路径——父级 process_event span 早已结束，若仍挂在其下会形成
+// 瀑布图虚假间隙；新根让释放链路可独立聚合、单独查询。
+func NewRootSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return tracer.Start(ctx, name, trace.WithAttributes(attrs...), trace.WithNewRoot())
+}
+
 // CaptureContent 是否记录消息内容（根 span 属性用）。
 func CaptureContent() bool { return captureContent }
 

@@ -49,7 +49,7 @@ func (p *openAIProvider) APIMode() APIMode { return p.cfg.apiMode() }
 
 func (p *openAIProvider) Chat(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
 	start := time.Now()
-	// 链路追踪：LLM 调用 span（Agent 循环/群管理审核/相关性判断共用统一入口）
+	// 链路追踪：LLM 调用 span（Agent 循环/群管理审核共用统一入口）
 	_, span := otelx.Span(ctx, "llm.call",
 		attribute.String("provider", p.ID()),
 		attribute.String("model", p.Model()),

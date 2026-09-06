@@ -479,15 +479,17 @@ type CronJobResp struct {
 // ---------- 回复策略 ----------
 
 type ReplyStrategyResp struct {
-	Strategy           string  `json:"strategy"`
-	RelevanceThreshold float64 `json:"relevance_threshold"`
-	BotName            string  `json:"bot_name"`
-	StripMarkdown      bool    `json:"strip_markdown"`
-	AgentLite          bool    `json:"agent_lite"`
-	RelevancePrompt    string  `json:"relevance_prompt"`  // 相关性检测自定义提示词
-	RelevanceModel     string  `json:"relevance_model"`   // 相关性检测使用的 Text Provider ID
-	RelevanceTimeout   int     `json:"relevance_timeout"` // 相关性检测超时（秒）
-	JudgeFailPolicy    string  `json:"judge_fail_policy"` // 判断失败策略: drop / reply
+	BotName                string  `json:"bot_name"`
+	StripMarkdown          bool    `json:"strip_markdown"`
+	AgentLite              bool    `json:"agent_lite"`
+	QuietGapSeconds        int     `json:"quiet_gap_seconds"`
+	ForceCount             int     `json:"force_count"`
+	MaxAgeSeconds          int     `json:"max_age_seconds"`
+	WindowMaxMsgs          int     `json:"window_max_msgs"`
+	JitterSeconds          int     `json:"jitter_seconds"`
+	ForceCountJitter       int     `json:"force_count_jitter"`
+	ParticipateProbability float64 `json:"participate_probability"`
+	TypingDelayMaxMs       int     `json:"typing_delay_max_ms"`
 }
 
 // ---------- 群管理 ----------

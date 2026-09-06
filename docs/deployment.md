@@ -131,11 +131,11 @@ make lint
 | 指标组 | 说明 |
 |--------|------|
 | `juanniang_events_total` / `juanniang_messages_total` | 事件与消息吞吐（按 post_type/message_type） |
-| `juanniang_message_dedup_dropped_total` / `juanniang_message_blocked_total` / `juanniang_message_dropped_total` | 去重丢弃 / 黑名单拦截 / 相关性-静默-刷屏丢弃 |
+| `juanniang_message_dedup_dropped_total` / `juanniang_message_blocked_total` / `juanniang_message_dropped_total` | 去重丢弃 / 黑名单拦截 / 噪音(irrelevant)-静默(silenced)丢弃 |
 | `juanniang_chat_replies_total` / `juanniang_chat_stats_dropped_total` | Agent 回复发送量（全局趋势）/ 统计事件丢弃（Loki 通道积压，恒为 0 为正常） |
 | `juanniang_agent_loops_total` / `_active` / `_duration_seconds` | Agent 循环完成结果（ok/error/timeout）、活跃数、耗时直方图 |
 | `juanniang_agent_concurrency_in_use` / `_waits_total` / `_wait_seconds` | 全局并发槽占用与令牌等待 |
-| `juanniang_llm_requests_total` / `_tokens_total` / `_latency_seconds` | LLM 调用、Token 消耗（按 agent/review/relevance 用途）、延迟 |
+| `juanniang_llm_requests_total` / `_tokens_total` / `_latency_seconds` | LLM 调用、Token 消耗（按 agent/review 用途）、延迟 |
 | `juanniang_groupmgr_violations_total` / `_detections_total` / `_rag_score` / `_llm_reviews_total` / `_spam_total` | 群管理处罚、判定流水（rag/keyword × punish/review/pass）、RAG 分数分布、审核结果、刷屏 |
 | `juanniang_rag_search_latency_seconds` / `_errors_total` | RAG 检索延迟与降级失败 |
 | `juanniang_plugins_loaded` / `juanniang_plugin_hook_errors_total` / `_duration_seconds` | 插件数、钩子错误（按 plugin+hook）、钩子耗时 |
@@ -170,7 +170,7 @@ scrape_configs:
 
 ## 链路追踪（Grafana Tempo）
 
-机器人对**每条事件**生成一个 trace（根 span `process_event`），下游各阶段（群管理检测/RAG 核实/处罚、插件派发、相关性判断、Agent ReAct 循环、LLM 调用、工具执行、RAG 调用、审核闸门、回复发送）均为子 span——在 Grafana Tempo 里可查看单条事件处理的**全流程瀑布图**，直接定位最慢/失败的阶段。
+机器人对**每条事件**生成一个 trace（根 span `process_event`），下游各阶段（群管理检测/RAG 核实/处罚、插件派发、参与窗口、Agent ReAct 循环、LLM 调用、工具执行、RAG 调用、审核闸门、回复发送）均为子 span——在 Grafana Tempo 里可查看单条事件处理的**全流程瀑布图**，直接定位最慢/失败的阶段。
 
 ### 环境变量
 
@@ -329,7 +329,7 @@ go tool pprof -http :8080 http://127.0.0.1:6060/debug/pprof/heap
 | 启动报 "Postgres 连接失败" | DB_HOST/PORT/USER/PASSWORD/NAME 错；compose 用 `postgres` 主机名 |
 | 启动报 "Redis 連接失败" | REDIS_ADDR/PASSWORD 错；compose 用 `redis:6379` |
 | OneBot 客户端连不上 8081 | OB_TOKEN 不匹配；浏览器访问无 `Authorization: Bearer`；检查防火墙 |
-| LLM 不回复消息 | 1) 没配置/激活 text_model Provider；2) 相关性判断未通过（@/命令/提及名字必回，其余按相关性阈值）；3) ACL 黑名单拒绝；4) 判断失败且策略为 `drop` |
+| LLM 不回复消息 | 1) 没配置/激活 text_model Provider；2) 参与窗口静默（安静释放受参与概率影响，LLM 也可输出 `__NO_REPLY__`）；3) ACL 黑名单拒绝 |
 | Agent 提示"未启用 T2I" | Web 面板 T2I 配置未启用 / `base_url` 不可达；`GET /t2i/health` 为 false |
 | CronJob 不触发 | 留意这是 6 字段（秒级）cron；`0 0 9 * * *` 才是每天 9:00 |
 | 插件改了不生效 | 改 `pluggin.yaml` 必须 reload；改 Lua 文件也要 toggle 后才重新 DoFile |
@@ -391,13 +391,13 @@ WantedBy=multi-user.target
 5. 在"Providers"页配置 LLM Provider（OpenAI 兼容端点），激活
 6. 在"Adapter"页配置 OB_TOKEN 与 admin QQ，启用
 7. 让 OneBot11 实现（NapCat/Lagrange 等）反向 WS 连 `ws://host:8081/`，带 `Authorization: Bearer <OB_TOKEN>`
-8. 在"回复设置"页配置相关性阈值等群聊行为（回复策略已收敛为仅按相关性回复）
+8. 在"回复设置"页配置参与窗口参数（安静间隔/插话计数/最迟必发/随机性等群聊行为）
 
 ## FAQ
 
 **Q: 为什么 LLM 拒绝调用某个工具？** A: ACL 规则把它拒绝了，或它在 MCP 但 MCP 断连；可在"ACL"页或"日志"流查看。
 
-**Q: Agent 在群里不回我？** A: 检查回复策略 + `isAtSelf` 是否精确匹配 `[CQ:at,qq=<bot>]`；`relevance` 模式下不会回复相关性低的消息。相关性判断有批量合并/冷却缓存/刷屏降级等优化——判断失败时默认不回复，可在回复策略页把"判断失败策略"改为 `reply` 照常回复。
+**Q: Agent 在群里不回我？** A: 先确认 `isAtSelf` 精确匹配 `[CQ:at,qq=<bot>]`（@/命令/提及名字必回）；非必回消息走参与窗口——检查"回复设置"页的参与概率与窗口参数（安静间隔/插话计数/最迟必发），以及群聊 LLM 是否输出 `__NO_REPLY__` 静默。
 
 **Q: 想只换前端不重编 Go？** A: 可以——前端是磁盘文件，`WEB_DIR` 指向新 `web/dist` 即可；二进制不嵌入它。
 

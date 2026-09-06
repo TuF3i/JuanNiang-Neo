@@ -56,8 +56,8 @@
 | 40050 | RAG 配置不存在 |
 | 40051 | 词库导入文件过大（≤1MB）或行数超限（≤20000） |
 | 40030 | 内置工具运行时常驻，不支持启停 |
-| 40031 | 无效的回复策略（已废弃：策略收敛为仅 relevance，不再返回） |
-| 40032 | 相关性阈值非法 / 判断失败策略只能是 drop 或 reply |
+| 40031 | 无效的回复策略（已废弃：策略收敛为参与窗口，不再返回） |
+| 40032 | 参与窗口参数非法（越界或不在允许范围） |
 | 40033 | 知识内容不能为空 |
 | 40034 | 图片大小不能超过 1.5MB |
 | 40035 | 不支持的图片格式（仅支持 jpg/png/gif/webp） |
@@ -100,7 +100,7 @@
 - `ACLScope`: `chat` | `tool` | `mcp`（**当前仅 `chat` 生效**，`tool`/`mcp` 为历史保留）
 - `ACLPermission`: `allow` | `deny`
 - `ACLTargetType`: `all` | `list`（`list` 时 `user_ids` 才有效）
-- `ReplyStrategy`: 仅 `relevance`（历史 `never_reply`/`at_only`/`always` 已移除）
+- `ReplyStrategy`: 参与窗口已取代旧 `relevance` 相关性判断（`strategy` 字段已从配置移除）
 
 **ACL 语义**（当前仅聊天黑名单）：无规则=允许所有；仅 `deny` 规则生效（`all`=禁止所有人、`list`=禁止指定 `user_ids`）；`allow` 规则不再生效；黑名单对所有用户生效（**管理员不豁免**）。
 
@@ -720,32 +720,43 @@ CronJob 增删改/toggle 后**自动 reload** 调度器（`robfig/cron`，6 字�
 
 ## 22. 回复策略
 
-系统回复策略（单例，仅一行）。控制群聊中 Agent 对消息的回复行为。
+系统回复策略（单例，仅一行）。控制群聊中 Agent 的参与/回复行为。
 
-**ReplyStrategy 枚举**（已收敛为仅一种）
+**参与模式**（已取代旧 relevance 相关性判断）
 
-| 值 | 含义 |
-|----|------|
-| `relevance` | 按相关性回复（唯一策略）：@/命令/提及名字必回；噪音消息规则过滤；其余候选批量合并为一次 LLM 判断（受 `relevance_threshold` 影响），带结果缓存/冷却与刷屏降级 |
-
-> 历史策略（`never_reply`/`at_only`/`always`）已移除；存量配置在启动时自动迁移为 `relevance`，`strategy` 字段保留在响应中供兼容。
+@/命令/提及名字/私聊必回（立即回复，不攒窗）；其余群聊消息攒进每群一个的参与窗口：
+等待「安静间隔」到期、或攒够「插话计数」条、或到达「最迟必发」后，把整窗消息一次性交给
+Agent 由 LLM 自门控（输出 `__NO_REPLY__` 即静默）决定参与或附和。随机参数用于让释放时机
+不那么"人机"，全部置 0/1 即确定性模式。噪音过滤覆盖剥离 CQ 码/URL 后无任何文字的消息
+（纯图/纯 sticker/表情）、≤2 字短消息与纯 emoji/符号（水群刷屏直接丢弃）；含 @（CQ:at）的消息及
+剥离 CQ 码/URL 后仍含文字（CJK/字母数字）的消息不算噪音，照常进窗口由 LLM 自门控。
 
 ### GET /reply-strategy
-获取配置。首次 GET 不存在时自动创建（`strategy=relevance, relevance_threshold=0.5`）。
 
-**data** `ReplyStrategyResp`: `strategy`（恒为 `relevance`）、`relevance_threshold` float64、`bot_name`、`strip_markdown` bool、`agent_lite` bool、`relevance_prompt` string、`relevance_model` string、`relevance_timeout` int（相关性判断超时秒，默认 10）、`judge_fail_policy` string（`drop`=判断失败不回复（默认）/ `reply`=照常回复）。
+获取配置。首次 GET 不存在时自动创建（参与窗口默认参数）。
+
+**data** `ReplyStrategyResp`: `bot_name`、`strip_markdown` bool、`agent_lite` bool、
+`quiet_gap_seconds` int（安静间隔，默认 5）、`force_count` int（插话计数强发，默认 5）、
+`max_age_seconds` int（最迟必发，默认 20）、`window_max_msgs` int（窗口消息数上限，默认 20）、
+`jitter_seconds` int（安静间隔随机抖动，默认 2）、`force_count_jitter` int（计数抖动，默认 1）、
+`participate_probability` float（安静释放参与概率，默认 0.8）、`typing_delay_max_ms` int（打字延迟上限，默认 1500）。
 
 ### PUT /reply-strategy
-更新（不再接受 `strategy` 字段，策略恒为 `relevance`）。
 
-**Body** `UpdateReplyStrategyReq`: `relevance_threshold`（必填）；`bot_name`、`strip_markdown`、`agent_lite`（可选）；`relevance_prompt`（相关性检测自定义提示词，空=默认）、`relevance_model`（相关性检测 Text Provider ID，空=默认）、`relevance_timeout`（相关性判断超时秒，0=默认 10s，范围 1-120）、`judge_fail_policy`（`drop`/`reply`，空=默认 `drop`）。
+更新参与窗口参数。
+
+**Body** `UpdateReplyStrategyReq`: `bot_name`、`strip_markdown`、`agent_lite`（可选）；
+`quiet_gap_seconds`（0=默认 5，范围 1-30）、`force_count`（0=默认 5，范围 2-20）、
+`max_age_seconds`（0=默认 20，范围 5-120）、`window_max_msgs`（0=默认 20，范围 5-50）、
+`jitter_seconds`（0=关闭，范围 0-10）、`force_count_jitter`（0=关闭，范围 0-5）、
+`participate_probability`（0-1，0=从不主动参与）、`typing_delay_max_ms`（0=关闭，范围 0-5000）。
 
 **data** `ReplyStrategyResp`。
 
 ```bash
 curl -X PUT http://localhost:8090/api/v1/reply-strategy \
   -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"relevance_threshold":0.6,"bot_name":"小卷","judge_fail_policy":"reply"}'
+  -d '{"bot_name":"小卷","quiet_gap_seconds":5,"force_count":5,"participate_probability":0.8}'
 ```
 
 ---

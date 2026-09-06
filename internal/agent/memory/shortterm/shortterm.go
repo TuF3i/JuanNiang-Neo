@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -259,10 +260,14 @@ type SkillMemoryUpdater interface {
 	UpdateSkillMemory(ctx context.Context, recentMsgs []ChatMessage) error
 }
 
+// compactMsgidMarkerRe 匹配短期记忆中的 [msgid:N] 长消息标记。
+// Compact 摘要前剥离该展示层内部标记，避免把其抄进长期记忆/技能记忆语料污染召回。
+var compactMsgidMarkerRe = regexp.MustCompile(`\[msgid:\d+\]`)
+
 func buildCompactContent(msgs []ChatMessage) string {
 	var out string
 	for _, m := range msgs {
-		out += fmt.Sprintf("[%s]: %s\n", m.Role, m.Content)
+		out += fmt.Sprintf("[%s]: %s\n", m.Role, compactMsgidMarkerRe.ReplaceAllString(m.Content, ""))
 	}
 	return out
 }

@@ -27,6 +27,13 @@ func newDedupTestHago(t *testing.T) (*HagoCenter, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// sqlite :memory: 每个连接独立建库：参与窗口/mustKeep 会并发开 goroutine，
+	// 必须限制单连接，否则并发连接会看到未迁移的空库（no such table）。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("db.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := core.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -48,18 +55,27 @@ func groupMsg(id int64) adapter.Event {
 			MessageID:   id,
 			UserID:      123,
 			GroupID:     456,
-			// 回复策略仅 relevance：文本含"机器人"关键词命中 isDefinitelyRelevant 必回快路径，
-			// 消息才能无 LLM Provider 地进入 handleMessage（去重测试不依赖相关性判断）。
+			// 参与模式必回快路径：文本含"机器人"关键词命中 isDefinitelyRelevant 直接回复，
+			// 消息才能无 LLM Provider 地进入 handleMessage（去重测试不依赖参与窗口）。
 			RawMessage: "你好机器人",
 			Message:    []adapter.Segment{{Type: "text", Data: map[string]any{"text": "你好机器人"}}},
 		},
 	}
 }
 
-func waitBatchConsumed(t *testing.T) {
+func waitBatchConsumed(t *testing.T, db *gorm.DB, want int64) {
 	t.Helper()
-	// 批处理窗口 1s，等待窗口结束且 timer 回调执行完（sqlite 写库同步）
-	time.Sleep(batchWindow + 500*time.Millisecond)
+	// mustKeep 消息异步经 runAgent goroutine 处理（sqlite 写库同步），
+	// 固定 sleep 在慢机上不保证覆盖 Session 创建/技能匹配/提示词构建耗时，
+	// 改为带超时轮询 chat_records 达到期望条数。
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if countUserRecords(t, db) == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("等待 %d 条 user 记录落库超时（实际 %d）", want, countUserRecords(t, db))
 }
 
 func countUserRecords(t *testing.T, db *gorm.DB) int64 {
@@ -81,7 +97,7 @@ func TestDuplicateMessageIDConsumedTwice(t *testing.T) {
 	h.processEvent(ctx, groupMsg(10086))
 	h.processEvent(ctx, groupMsg(10086)) // 同一条消息再次投递
 
-	waitBatchConsumed(t)
+	waitBatchConsumed(t, db, 1)
 
 	if got := countUserRecords(t, db); got != 1 {
 		t.Fatalf("同一条 message_id=10086 被消费了 %d 次，期望 1 次", got)
@@ -96,7 +112,7 @@ func TestDistinctMessageIDsProcessedOnce(t *testing.T) {
 	h.processEvent(ctx, groupMsg(10086))
 	h.processEvent(ctx, groupMsg(10087))
 
-	waitBatchConsumed(t)
+	waitBatchConsumed(t, db, 2)
 
 	if got := countUserRecords(t, db); got != 2 {
 		t.Fatalf("两条不同消息应各自消费一次，实际消费 %d 次", got)

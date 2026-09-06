@@ -58,6 +58,20 @@ const tools = [
 // --- RAG 向量检索 ---
 let ragConfig = { base_url: 'http://localhost:3000', timeout: 30, is_active: true }
 let ragHealthy = true
+// 回复设置 mock 共享态：PUT 落盘，后续 GET 返回已保存的配置（而非始终回显默认值）
+let replyStrategyState = {
+  bot_name: '小卷',
+  strip_markdown: false,
+  agent_lite: false,
+  quiet_gap_seconds: 5,
+  force_count: 5,
+  max_age_seconds: 20,
+  window_max_msgs: 20,
+  jitter_seconds: 2,
+  force_count_jitter: 1,
+  participate_probability: 0.8,
+  typing_delay_max_ms: 1500,
+}
 // GET /info 参考 JuanNiang-RAG-Service API 文档示例（scoops: 分库名 → tag/块数量）
 let ragInfo = {
   status: 'ok',
@@ -213,6 +227,54 @@ const VALID_TOKEN = 'mock-jwt-token-juanniang'
 // ============================================================
 const ok = (data: any = null) => ({ status: 0, info: 'OK', data })
 const err = (status: number, info: string) => ({ status, info, data: null })
+
+// ---- 严格数值解析（与服务端 BindJSON + normalizeInt 语义对齐） ----
+// 未提供(undefined)/null → 0（Go 零值，走 0=默认 / 0=关闭 语义）；
+// 其余仅接受 typeof === 'number' 的有限值，整数参数额外要求 Number.isInteger——
+// 字符串/浮点/非有限值对应服务端 BindJSON 失败 → 40001 参数格式错误；
+// 负数/越界 → 40032 范围错误。不做 Number() 隐式转换、不做 Math.trunc 截断。
+
+// intVal 严格整数解析：未提供/null → 0；类型/非整数/非有限 → 40001。
+const intVal = (v: any): number | ReturnType<typeof err> => {
+  if (v === undefined || v === null) return 0
+  if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v)) {
+    return err(40001, '参数格式错误')
+  }
+  return v
+}
+
+// floatVal 严格浮点解析：未提供/null → 0；类型/非有限 → 40001。
+const floatVal = (v: any): number | ReturnType<typeof err> => {
+  if (v === undefined || v === null) return 0
+  if (typeof v !== 'number' || !Number.isFinite(v)) return err(40001, '参数格式错误')
+  return v
+}
+
+// normInt 整数参数归一化（0=默认 def）：类型/非整数 → 40001；负数/越界 → 40032。
+const normInt = (v: any, min: number, max: number, def: number, msg: string): number | ReturnType<typeof err> => {
+  const n = intVal(v)
+  if (typeof n !== 'number') return n
+  if (n < 0) return err(40032, msg)
+  if (n === 0) return def
+  if (n < min || n > max) return err(40032, msg)
+  return n
+}
+
+// rngInt 整数范围校验（0=关闭合法值，无 0=默认）：类型/非整数 → 40001；越界 → 40032。
+const rngInt = (v: any, min: number, max: number, msg: string): number | ReturnType<typeof err> => {
+  const n = intVal(v)
+  if (typeof n !== 'number') return n
+  if (n < min || n > max) return err(40032, msg)
+  return n
+}
+
+// rngFloat 浮点范围校验（0=关闭合法值）：类型 → 40001；越界 → 40032。
+const rngFloat = (v: any, min: number, max: number, msg: string): number | ReturnType<typeof err> => {
+  const n = floatVal(v)
+  if (typeof n !== 'number') return n
+  if (n < min || n > max) return err(40032, msg)
+  return n
+}
 
 // ============================================================
 // Route Handlers
@@ -701,20 +763,50 @@ export const mockHandlers: MockHandler[] = [
   {
     method: 'GET', path: '/reply-strategy',
     handler() {
-      return ok({
-        strategy: 'always',
-        relevance_threshold: 0.5,
-        bot_name: '小卷',
-        strip_markdown: false,
-        agent_lite: false,
-        relevance_prompt: '',
-        relevance_model: '',
-      })
+      return ok({ ...replyStrategyState })
     }
   },
   {
     method: 'PUT', path: '/reply-strategy',
-    handler({ body }) { return ok(body) }
+    handler({ body }) {
+      // 与服务端行为对齐：把请求绑定到零值策略上——只取请求里显式给出的字段，
+      // 未提供的字段落回默认值，而不是浅合并旧状态（否则删掉的字段会残留）。
+      // 数值字段严格解析：类型/非整数 → 40001（BindJSON），负数/越界 → 40032（范围）。
+      const b = body || {}
+      const quietGap = normInt(b.quiet_gap_seconds, 1, 30, 5, '安静间隔必须在 1-30 秒之间（0=默认 5s）')
+      if (typeof quietGap !== 'number') return quietGap
+      const forceCount = normInt(b.force_count, 2, 20, 5, '插话计数强发必须在 2-20 条之间（0=默认 5）')
+      if (typeof forceCount !== 'number') return forceCount
+      const maxAge = normInt(b.max_age_seconds, 5, 120, 20, '最迟必发必须在 5-120 秒之间（0=默认 20s）')
+      if (typeof maxAge !== 'number') return maxAge
+      const windowMax = normInt(b.window_max_msgs, 5, 50, 20, '窗口消息数上限必须在 5-50 条之间（0=默认 20）')
+      if (typeof windowMax !== 'number') return windowMax
+      // 随机抖动/概率/打字延迟：0 为合法值（关闭），仅做范围校验（与服务端一致）
+      const jitter = rngInt(b.jitter_seconds, 0, 10, '随机抖动幅度必须在 0-10 秒之间')
+      if (typeof jitter !== 'number') return jitter
+      const forceJitter = rngInt(b.force_count_jitter, 0, 5, '计数抖动幅度必须在 0-5 之间')
+      if (typeof forceJitter !== 'number') return forceJitter
+      const prob = rngFloat(b.participate_probability, 0, 1, '参与概率必须在 0-1 之间')
+      if (typeof prob !== 'number') return prob
+      const typingDelay = rngInt(b.typing_delay_max_ms, 0, 5000, '打字延迟必须在 0-5000 毫秒之间')
+      if (typeof typingDelay !== 'number') return typingDelay
+      // 全量替换持久化状态：未提供的字段（bot_name/strip_markdown/agent_lite）落回零值，
+      // 参与窗口整数参数 0=默认已由上方归一化。
+      replyStrategyState = {
+        bot_name: typeof b.bot_name === 'string' ? b.bot_name : '',
+        strip_markdown: !!b.strip_markdown,
+        agent_lite: !!b.agent_lite,
+        quiet_gap_seconds: quietGap,
+        force_count: forceCount,
+        max_age_seconds: maxAge,
+        window_max_msgs: windowMax,
+        jitter_seconds: jitter,
+        force_count_jitter: forceJitter,
+        participate_probability: prob,
+        typing_delay_max_ms: typingDelay,
+      }
+      return ok({ ...replyStrategyState })
+    }
   },
 
   // ============ Logs ============

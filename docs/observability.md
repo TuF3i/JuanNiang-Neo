@@ -86,7 +86,10 @@ scrape_configs:
 | `juanniang_messages_total` | `message_type` | 群/私聊消息数 |
 | `juanniang_message_dedup_dropped_total` | — | 幂等去重丢弃（WS 重连重复推送） |
 | `juanniang_message_blocked_total` | `reason` | 黑名单拦截 |
-| `juanniang_message_dropped_total` | `reason` | 相关性/静默/刷屏丢弃 |
+| `juanniang_message_dropped_total` | `reason` | 规则噪音(irrelevant)/静默(silenced)/违禁剔除(gm_verdict_black)丢弃 |
+| `juanniang_participation_window_releases_total` | `reason` | 参与窗口释放（quiet/force_count/max_age） |
+| `juanniang_participation_window_dropped_total` | `reason` | 窗口丢弃（window_silenced 概率静默/window_discarded mustKeep 丢窗/overflow 溢出丢最旧） |
+| `juanniang_agent_participation_total` | `result` | 参与模式结果（reply/silent），参与率=reply/(reply+silent) |
 | `juanniang_chat_replies_total` | `message_type` | Agent 回复发送数（全局趋势；**每群细分走 Loki**） |
 | `juanniang_chat_stats_dropped_total` | `direction` | 统计事件丢弃（Loki 通道队列满/写失败） |
 | `juanniang_agent_loops_total` | `outcome` | ReAct 循环结果（ok/error/timeout） |
@@ -94,7 +97,7 @@ scrape_configs:
 | `juanniang_agent_concurrency_waits_total` | `result` | 全局并发令牌等待（acquired/timeout） |
 | `juanniang_agent_concurrency_wait_seconds` | — | 令牌等待耗时 |
 | `juanniang_llm_requests_total` | `provider,result` | LLM 调用与错误 |
-| `juanniang_llm_tokens_total` | `phase` | Token 消耗（agent/review/relevance） |
+| `juanniang_llm_tokens_total` | `phase` | Token 消耗（agent/review/participation） |
 | `juanniang_llm_latency_seconds` | — | LLM 延迟直方图 |
 | `juanniang_groupmgr_violations_total` | `category,action` | 群管理三级惩罚（warn/mute/kick） |
 | `juanniang_groupmgr_detections_total` | `path,verdict` | 违禁判定流水（rag/keyword × punish/review/pass） |
@@ -201,15 +204,21 @@ graph TD
     VR --> RS[rag.search]
     GM --> PR[groupmgr.punish]
     P --> PD[plugin.dispatch]
-    P --> RC[relevance.check]
-    RC --> LC[llm.call]
+    P --> PD2[participation.discard]
     P --> AH[agent.handle]
     AH --> LC2[llm.call]
     AH --> TE[tool.execute]
     AH --> SR[rag.search 记忆召回]
     P --> RG[groupmgr.review_gate]
     P --> SP[send.reply]
+    R[participation.release] --> RAH[agent.handle]
+    R --> RGM[groupmgr.review_gate]
 ```
+
+> **`participation.release` 是独立根 span（`WithNewRoot`），不挂在 process_event 下**：
+> 释放发生在安静定时器/强发路径，父级 process_event span 早已结束，若强行嵌套会形成
+> 5~30s 虚假间隙。独立 trace 反而便于按 `service.name + participation.release` 单独聚合
+> 释放节奏。`participation.discard`（mustKeep 丢窗）仍在事件循环内，是 process_event 的子 span。
 
 ### 查询
 
@@ -236,7 +245,7 @@ graph LR
 
 | 症状 | 先看 | 再看 |
 |---|---|---|
-| 某个群机器人不回复 | Loki：`sum by (group_id)` 该群近期 reply 数 | Prometheus：`juanniang_message_dropped_total{reason="silenced"}`；Tempo：该群最后一条消息 trace |
+| 某个群机器人不回复 | Loki：`sum by (group_id)` 该群近期 reply 数 | Prometheus：`juanniang_agent_participation_total{result="silent"}` 占比 + `juanniang_participation_window_releases_total`；Tempo：该群最后一条消息 trace 或 `participation.release` 独立 trace |
 | 整体回复变慢 | Prometheus：`juanniang_llm_latency_seconds` P95 | Tempo：`llm.call` 耗时分布；检查 Provider 限流 |
 | LLM 报错率上升 | Prometheus：`juanniang_llm_requests_total{result="error"}` | Tempo：`status=error` 的 `llm.call` span |
 | 群管理处罚异常 | Prometheus：`juanniang_groupmgr_detections_total` 各 path 占比 | Loki：`{job="juanniang", source="groupmgr"}` 处罚话术明细 |

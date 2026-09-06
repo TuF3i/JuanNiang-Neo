@@ -27,7 +27,7 @@
 
 ### 模型选取
 
-唯一调用点：`HagoCenter.handleMessage` 用 `Providers.SelectModel(ModelTypeText)` 得到对话 Provider；相关性判断由 `filterRelevant` 规则快路径过滤后，候选消息经 `relevanceBatchEvaluate` 批量合并为一次 LLM 判断（含图消息在有 Vision Provider 时走 Vision 判定）。
+唯一调用点：`HagoCenter.handleMessage` 用 `Providers.SelectModel(ModelTypeText)` 得到对话 Provider；参与窗口 release 时整窗一次交给 Agent，由 LLM 自门控（`__NO_REPLY__`）决定参与/静默，图片消息直接在 Agent 循环内由 Vision 能力处理。
 
 ### 接入指南
 

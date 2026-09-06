@@ -73,29 +73,28 @@ type HagoCenter struct {
 	// SelfID 和 SelfNickname 从 Adapter 获取后缓存
 	SelfQQ       int64
 	SelfNickname string
-	// 消息批处理：同一 ChatArea 在短窗口内的消息合并为一次 Agent 处理
-	batches map[string]*pendingBatch
-	batchMu sync.Mutex
+	// 参与窗口：每群一个，攒窗后整窗一次喂给 Agent（trailing 安静定时器 + 计数/最迟必发）
+	windows  map[string]*participationWindow
+	windowMu sync.Mutex
+	// inflight 参与窗口在途互斥：同一 ChatArea 同一时间只允许一个参与窗口在 Agent 处理中。
+	// 处理期间新消息进入累积窗口只攒不放（releaseWindow 检测到在途即延后），
+	// 等上一窗口处理完（runAgent 完成回调 → checkWindowRelease）再检查释放条件，
+	// 避免"攒 5 条就回，一刷 15 条 bot 连回 3 次"的突发重复回复。
+	inflightMu sync.Mutex
+	inflight   map[string]bool
 
-	// sendMu 全局发送互斥锁：所有批次的发送动作串行执行，
-	// 避免多批次/多分组并行完成时回复交叉乱序（如一条完整回复被另一条插入打断）。
+	// sendMu 全局发送互斥锁：所有窗口/批次的发送动作串行执行，
+	// 避免多窗口/多群并行完成时回复交叉乱序（如一条完整回复被另一条插入打断）。
 	// 只保护"发送动作"（毫秒级），不阻塞 ReAct 循环，不影响多群并行处理。
 	sendMu sync.Mutex
 
-	// 相关性判断结果缓存（Redis，L2.3/L4.2）
+	// 共享 Redis 缓存（消息去重/短期记忆/会话 Token 统计等基础设施共用）
 	Cache *cache.Cache
 
 	// 工具"仅管理员"名单（DB 驱动，Tools 页可切换）：admin_only=true 的工具
 	// 只能由 Admins 列表内用户调用（防提示词注入诱导敏感操作）
 	toolAdminOnlyMu sync.RWMutex
 	toolAdminOnly   map[string]bool
-
-	// 相关性判断并发闸门（L3.1）：限制全局并发，避免热聊时打爆 provider
-	relevanceSem chan struct{}
-
-	// 热聊统计（内存，L2.2/L4.1）：1s 滑动窗口消息计数，用于动态批窗口与刷屏降级
-	hotMu    sync.Mutex
-	hotStats map[string]*hotStat
 
 	// 知识库 LRU（50 条，缓存对话前检索结果，加速匹配）
 	knowledgeLRU *knowledgeLRU
@@ -146,9 +145,8 @@ func NewHagoCenter() *HagoCenter {
 		Skills:        skill.NewSkillEngine(),
 		CronJobEvents: make(chan adapter.Event, 64),
 		Loops:         NewLoopTracker(),
-		batches:       make(map[string]*pendingBatch),
-		hotStats:      make(map[string]*hotStat),
-		relevanceSem:  make(chan struct{}, relevanceSemLimit),
+		windows:       make(map[string]*participationWindow),
+		inflight:      make(map[string]bool),
 		toolAdminOnly: make(map[string]bool),
 		knowledgeLRU:  newKnowledgeLRU(50),
 		msgDedup:      newMemoryDedup(dedupWindow), // 占位，Init 时按 Cache 可用性覆盖为 redisDedup

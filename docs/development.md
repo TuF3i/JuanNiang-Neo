@@ -30,7 +30,7 @@
 | 加记忆类型 | `internal/agent/memory/` 子包：`shortterm/`（Redis 滑窗，默认 100 条 + AutoCompact）、`longterm/`（PG + HotArea）、`skillmem/`（技能记忆） |
 | 加日志模块 | `internal/logging/`（`github.com/fatih/color` 彩色 stdout + JSON + WARN+ 调用栈 + Hub/SSE + GORM SQL + Web UI） |
 | 调整 Agent 并发限制 | `internal/agent/concurrency.go`（默认 8/ChatArea） |
-| 调整相关性判断优化 | `internal/agent/reply_strategy.go`（规则快路径/批量判断/超时/失败策略）+ `event.go::filterRelevant`（缓存/冷却/刷屏降级编排）+ `agent.go`（判断信号量/热聊统计） |
+| 调整参与窗口/回复策略 | `internal/agent/event.go`（dispatchToAgent / enqueueParticipation / releaseWindow）+ `reply_strategy.go`（规则快路径）+ 参与参数在 `reply_strategy_config` 表 |
 | 修改分段回复算法 | `internal/agent/event.go::splitMessages`（Maibot 式自然断句） |
 | 加 ACL 维度 | `internal/core/acl/acl.go::Check` + `models.ACLRule` |
 | 写 Lua 插件 | 读 [plugin-development.md](plugin-development.md) |
@@ -65,7 +65,7 @@ internal/
     concurrency.go      每 ChatArea 并发控制 (默认 8 goroutine)
     eino_middleware.go  Eino ADK 中间件 (BeforeAgent 动态指令注入 / AgentLite 工具过滤 / WrapInvokableToolCall 同步执行包装)
     event.go            三阶段事件循环 (Plugin.Dispatch → ReplyStrategy → dispatchToAgent)
-    reply_strategy.go   回复策略 (收敛为仅 Relevance：规则快路径 + 批量判断/缓存/降级)
+    reply_strategy.go   参与窗口规则快路径 (必回/噪音过滤 + isAtSelf/isPluginCommand)
   api/          Hertz Web (engine + middleware + router + service)
   core/         Init / dao.Bundle / models (31 表) / acl / cache / imgstore(图床文件存储)
   pluggin/      Lua 引擎 + 命令树 + 内嵌 SDK + 系统插件
@@ -92,12 +92,12 @@ docs/                   本文档树
 | MCP (SSE) | ✅ |
 | Memory (shortterm Redis 100 条滑窗 + AutoCompact / longterm PG+HotArea / skillmem) | ✅ |
 | Prompt (SystemLocked + BuildFullContext，工具感知走 Eino tools 参数不拼入提示词) | ✅ |
-| ToolRegistry + 内置工具 | ✅（除 `vision` builtin 只返回提示，真 Vision 走 reply_strategy.go）|
+| ToolRegistry + 内置工具 | ✅ |
 | Lua 插件引擎 + 命令树 + 系统 SDK + 系统插件 | ✅ |
 | Web API 121 路由 (+`/health`) + JWT + SSE 日志 | ✅ |
 | 前端 28 页 (Vue 3 + Vuetify 3) | ✅ |
 | AgentLite 模式 / StripMarkdown / 分消息段 | ✅ |
-| relevance 判断优化（L1 规则快路径 / L2 批量判断+结果缓存+冷却 / L3 并发限流+超时 / L4 刷屏降级+失败策略） | ✅ |
+| 参与窗口（必回快路径 + 攒窗整窗参与 + 安静/计数/最迟释放 + 随机抖动/参与概率/打字延迟） | ✅ |
 | 工具"仅管理员"开关（admin_only，Tools 页逐工具切换，防提示词注入） | ✅ |
 | SQL 知识库（Web CRUD + Agent 异步提取关键词 + 对话前 LRU/模糊匹配注入提示词） | ✅ |
 | 图床（data/imgs 存储 + 1.5MB/MIME 校验 + 虚拟文件夹 + imgs:// 发送层解析） | ✅ |
@@ -111,7 +111,7 @@ docs/                   本文档树
 | `HagoCenter.SetToolActive` | ⚠ 停用只能 Unregister，无法重新注册已 Unregister 的 builtin |
 | `internal/core/handler/` | ⚠ 空目录占位 |
 | `database` 插件权限的 `prefixSQL` | ⚠ 桩，未生效，任意 SQL |
-| 内置 `vision` 工具 | ⚠ 返回提示，不真正取图（真 Vision 见 reply_strategy.go:70） |
+| 内置 `vision` 工具 | ⚠ 下载图片并调用配置的 Vision Provider；未配置时返回提示 |
 
 ## 约定（必须遵守）
 

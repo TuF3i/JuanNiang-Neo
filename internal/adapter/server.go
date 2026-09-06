@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -321,6 +322,8 @@ func parseEvent(raw []byte) Event {
 	case "message":
 		var msg MessageEvent
 		json.Unmarshal(raw, &msg)
+		// 无损规范化 reply id（大整数不经过 float64），见 normalizeReplyIDs
+		normalizeReplyIDs(&msg, raw)
 		ev.Message = &msg
 		log.Info("收到消息", "type", msg.MessageType, "user_id", msg.UserID, "content", msg.RawMessage)
 	case "notice":
@@ -341,6 +344,25 @@ func parseEvent(raw []byte) Event {
 	}
 
 	return ev
+}
+
+// normalizeReplyIDs 把 reply 段 data.id 从原始 JSON 无损规范化为 int64。
+// 普通 json.Unmarshal 会把大整数落入 map[string]any → float64（QQ message_id
+// 可达 19 位 > 2^53），导致引用关联/撤回失效；这里用 gjson 按字符串读取原值
+// 再转 int64，规避 float64 中间态的精度丢失。
+func normalizeReplyIDs(msg *MessageEvent, raw []byte) {
+	for i := range msg.Message {
+		if msg.Message[i].Type != "reply" {
+			continue
+		}
+		p := fmt.Sprintf("message.%d.data.id", i)
+		if !gjson.GetBytes(raw, p).Exists() {
+			continue
+		}
+		if id, err := strconv.ParseInt(gjson.GetBytes(raw, p).String(), 10, 64); err == nil {
+			msg.Message[i].Data["id"] = id
+		}
+	}
 }
 
 func (c *wsConn) close() {

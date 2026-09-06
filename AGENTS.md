@@ -29,7 +29,7 @@
 - `cmd/server/main.go` — 程序入口，完全装配（基础设施 → core → adapter → agent → 插件 → Web API + 带 watchdog 的优雅退出）；`devconfig.go` 负责加载 `dev.yaml`（优先级：环境变量 > dev.yaml > 内置默认值）。
 - `internal/` — 应用代码，模块外不导出任何内容：
   - `adapter/` — OneBot11 反向 WS 服务端 + Webhook 适配器 + API 客户端 + 事件 + 消息段 + `imgs://`/`stk://` base64 解析器。
-  - `agent/` — 基于 Eino ADK 的 Agent 核心；子包 `cronjob`、`fishcal`、`mcp`、`memory`（shortterm/longterm/skillmem，长期记忆对话语义召回走 pg_trgm GIN 倒排）、`prompt`、`provider`、`scheduledmsg`、`session`、`skill`、`tool`。`ConcurrencyManager` 限制每个 ChatArea 的并行 Agent 循环数（默认 8）；`reply_strategy.go` 实现 relevance 快路径/批量判断/缓存/降级管线；`event.go` 是批处理事件循环。由 `agent.go` 中的 `HagoCenter` 聚合。
+  - `agent/` — 基于 Eino ADK 的 Agent 核心；子包 `cronjob`、`fishcal`、`mcp`、`memory`（shortterm/longterm/skillmem，长期记忆对话语义召回走 pg_trgm GIN 倒排）、`prompt`、`provider`、`scheduledmsg`、`session`、`skill`、`tool`。`ConcurrencyManager` 限制每个 ChatArea 的并行 Agent 循环数（默认 8）；`reply_strategy.go` 实现必回/必不回的规则快路径（@/命令/提及名字/私聊必回，噪音丢弃）；`event.go` 是参与窗口事件循环（安静间隔/插话计数强发/最迟必发/随机静默）。由 `agent.go` 中的 `HagoCenter` 聚合。
   - `api/` — Hertz Web 引擎 + `middleware`（JWT）+ `router` + `service` + `dto`。`/api/v1` 下共 121 条路由（`internal/api/router/router.go`），根路径仅 `GET /health`。OpenAPI 规范见 `api/openapi.yaml`（与路由对齐）。
   - `core/` — `acl`、`cache`、`dao`、`handler`、`imgstore`、`models`（31 张表，由 `core.go::AutoMigrate` 创建）。
   - `pluggin/` — gopher-lua 引擎：加载器、命令树、内嵌 SDK + 系统插件（`//go:embed`）、插件商店客户端。

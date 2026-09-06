@@ -348,18 +348,22 @@ type ToggleCronJobReq struct {
 }
 
 // ---------- 回复策略 ----------
-// 回复策略已收敛为仅 relevance：请求不再接受 strategy 字段，
-// 以下均为相关性判断的参数配置。
+// 参与窗口已取代旧 relevance 相关性判断：@/命令/提及名字/私聊必回，
+// 其余群聊消息攒窗后整窗一次喂给 Agent，由 LLM 自门控（__NO_REPLY__）决定参与或静默。
+// 以下均为参与窗口参数配置。
 
 type UpdateReplyStrategyReq struct {
-	RelevanceThreshold float64 `json:"relevance_threshold"`
-	BotName            string  `json:"bot_name"`
-	StripMarkdown      bool    `json:"strip_markdown"`
-	AgentLite          bool    `json:"agent_lite"`
-	RelevancePrompt    string  `json:"relevance_prompt"`  // 相关性检测自定义提示词（空则用默认）
-	RelevanceModel     string  `json:"relevance_model"`   // 相关性检测使用的 Text Provider ID（空则用默认）
-	RelevanceTimeout   int     `json:"relevance_timeout"` // 相关性检测超时（秒），0=默认 10s
-	JudgeFailPolicy    string  `json:"judge_fail_policy"` // 判断失败策略: drop=不回复（默认）, reply=照常回复
+	BotName                string  `json:"bot_name"`
+	StripMarkdown          bool    `json:"strip_markdown"`
+	AgentLite              bool    `json:"agent_lite"`
+	QuietGapSeconds        int     `json:"quiet_gap_seconds"`       // 安静间隔（秒），0=默认 5s
+	ForceCount             int     `json:"force_count"`             // 插话计数强发，0=默认 5
+	MaxAgeSeconds          int     `json:"max_age_seconds"`         // 最迟必发（秒），0=默认 20s
+	WindowMaxMsgs          int     `json:"window_max_msgs"`         // 窗口消息数上限，0=默认 20
+	JitterSeconds          int     `json:"jitter_seconds"`          // 安静间隔随机抖动幅度（秒），0=关闭
+	ForceCountJitter       int     `json:"force_count_jitter"`      // 插话计数随机抖动幅度，0=关闭
+	ParticipateProbability float64 `json:"participate_probability"` // 安静释放参与概率 0-1，0=从不主动参与
+	TypingDelayMaxMs       int     `json:"typing_delay_max_ms"`     // 发送前打字延迟上限（毫秒），0=关闭
 }
 
 // ---------- 群管理 ----------

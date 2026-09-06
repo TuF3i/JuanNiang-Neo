@@ -24,7 +24,6 @@ type AdapterProvider interface {
 	SendPrivateMsg(userID int64, message any) (int64, error)
 	SendGroupMsg(groupID int64, message any) (int64, error)
 	DeleteMsg(messageID int64) error
-	GetMsg(messageID int64) (*adapter.MessageEvent, error)
 	GetGroupInfo(groupID int64) (*adapter.GroupInfo, error)
 	GetGroupMemberList(groupID int64) ([]adapter.GroupMemberInfo, error)
 	KickGroupMember(groupID, userID int64, rejectAdd bool) error
@@ -511,31 +510,6 @@ func delete_msg(adapter AdapterProvider) *onebotTool {
 			return "", err
 		}
 		return "消息已撤回", nil
-	}
-	return onebotToolBuild(executer, input)
-}
-
-// get_msg 根据消息 ID 获取消息的完整内容（包括被引用的消息）。
-func get_msg(adapter AdapterProvider) *onebotTool {
-	input := NewToolInput{
-		id:          "",
-		name:        "get_msg",
-		desc:        "根据消息 ID 获取消息的完整内容（包括被引用的消息）",
-		params:      Int64Param("message_id", "消息 ID", true),
-		builtin:     true,
-		longRunning: false,
-	}
-	executer := func(ctx context.Context, args json.RawMessage) (string, error) {
-		var p struct {
-			MessageID int64 `json:"message_id"`
-		}
-		_ = json.Unmarshal(args, &p)
-		msg, err := adapter.GetMsg(p.MessageID)
-		if err != nil {
-			return "", err
-		}
-		data, _ := json.Marshal(msg)
-		return string(data), nil
 	}
 	return onebotToolBuild(executer, input)
 }
@@ -1239,7 +1213,7 @@ func ImageURLCandidates(rawURL string) []string {
 	return candidates
 }
 
-// DownloadImageBytes 下载图片字节（vision 工具与群聊相关性识图共用）。
+// DownloadImageBytes 下载图片字节（vision 等识图工具共用）。
 // 依次尝试 URL 解码变体，任一成功即返回；带响应体大小上限。
 func DownloadImageBytes(ctx context.Context, rawURL string) ([]byte, error) {
 	candidates := ImageURLCandidates(rawURL)
@@ -1462,7 +1436,6 @@ func RegisterBuiltinTools(
 	tools = append(tools, send_private_msg(adapter, getCurrentMsg))
 	tools = append(tools, send_group_msg(adapter, getCurrentMsg))
 	tools = append(tools, delete_msg(adapter))
-	tools = append(tools, get_msg(adapter))
 
 	// --- OneBot11 群管理 ---
 

@@ -219,9 +219,159 @@
       "title": "LLM 调用（按 provider）",
       "type": "timeseries"
     },
+
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 114,
+      "panels": [],
+      "title": "🎯 参与窗口",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "id": 33,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltipOptions": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(juanniang_participation_window_releases_total{job=~\"$job\"}[$__rate_interval])) by (reason)",
+          "legendFormat": "释放:{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "参与窗口释放速率（按 reason）",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "id": 34,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltipOptions": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(juanniang_participation_window_dropped_total{job=~\"$job\"}[$__rate_interval])) by (reason)",
+          "legendFormat": "丢窗:{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "参与窗口丢窗速率（按 reason）",
+      "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
+      "id": 35,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltipOptions": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(juanniang_agent_participation_total{result=\"reply\",job=~\"$job\"}[$__rate_interval])) / sum(increase(juanniang_agent_participation_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "参与率",
+          "refId": "A"
+        }
+      ],
+      "title": "参与率（reply / reply+silent）",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
       "id": 103,
       "panels": [],
       "title": "🩺 健康与资源",
@@ -238,7 +388,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 19 },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 28 },
       "id": 5,
       "options": {
         "colorMode": "value",
@@ -270,7 +420,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 19 },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 28 },
       "id": 6,
       "options": {
         "colorMode": "value",
@@ -305,7 +455,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 19 },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 28 },
       "id": 7,
       "options": {
         "colorMode": "value",
@@ -337,7 +487,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 19 },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 28 },
       "id": 8,
       "options": {
         "colorMode": "value",
@@ -360,7 +510,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
       "id": 104,
       "panels": [],
       "title": "💬 消息流",
@@ -396,7 +546,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
       "id": 9,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -442,7 +592,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
       "id": 10,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -470,7 +620,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
       "id": 105,
       "panels": [],
       "title": "🤖 Agent 与并发",
@@ -506,7 +656,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 34 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
       "id": 11,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -562,7 +712,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 34 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
       "id": 12,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -608,7 +758,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 34 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
       "id": 13,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -636,7 +786,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
       "id": 106,
       "panels": [],
       "title": "🧠 LLM 用量",
@@ -672,7 +822,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
       "id": 14,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -728,7 +878,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
       "id": 15,
       "options": {
         "legend": { "calcs": [ "max" ], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -741,12 +891,12 @@
           "refId": "A"
         }
       ],
-      "title": "Token 消耗速率（agent / review / relevance）",
+      "title": "Token 消耗速率（agent / review）",
       "type": "timeseries"
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 60 },
       "id": 107,
       "panels": [],
       "title": "🛡️ 群管理深度",
@@ -782,7 +932,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 61 },
       "id": 16,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -828,7 +978,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 61 },
       "id": 17,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -866,7 +1016,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 60 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 69 },
       "id": 108,
       "panels": [],
       "title": "🛡️ 群管理（续）与 RAG 服务",
@@ -902,7 +1052,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 61 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 70 },
       "id": 18,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -948,7 +1098,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 61 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 70 },
       "id": 19,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -994,7 +1144,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 61 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 70 },
       "id": 20,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1048,7 +1198,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 61 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 70 },
       "id": 21,
       "options": {
         "legend": { "calcs": [ "max" ], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1066,7 +1216,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 69 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 78 },
       "id": 109,
       "panels": [],
       "title": "🔌 插件",
@@ -1105,7 +1255,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 70 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 79 },
       "id": 22,
       "options": {
         "legend": { "calcs": [ "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -1151,7 +1301,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 70 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 79 },
       "id": 23,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1179,7 +1329,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 78 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 87 },
       "id": 110,
       "panels": [],
       "title": "🌐 HTTP API",
@@ -1215,7 +1365,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 79 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 88 },
       "id": 24,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1261,7 +1411,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 79 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 },
       "id": 25,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1289,7 +1439,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 87 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 96 },
       "id": 111,
       "panels": [],
       "title": "📦 库存与 Go 运行时",
@@ -1306,7 +1456,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 88 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 97 },
       "id": 26,
       "options": {
         "displayMode": "gradient",
@@ -1355,7 +1505,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 97 },
       "id": 27,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1378,7 +1528,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 96 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 105 },
       "id": 112,
       "panels": [],
       "title": "💾 进程资源",
@@ -1414,7 +1564,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 97 },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 106 },
       "id": 28,
       "options": {
         "legend": { "calcs": [ "current" ], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1460,7 +1610,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 97 },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 106 },
       "id": 29,
       "options": {
         "legend": { "calcs": [ "current" ], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1506,7 +1656,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 97 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 106 },
       "id": 30,
       "options": {
         "legend": { "calcs": [ "current" ], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1557,7 +1707,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 97 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 106 },
       "id": 31,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -1580,7 +1730,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 105 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 114 },
       "id": 113,
       "panels": [],
       "title": "🗺️ API 热点",
@@ -1605,7 +1755,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 106 },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 115 },
       "id": 32,
       "options": {
         "cellHeight": "sm",

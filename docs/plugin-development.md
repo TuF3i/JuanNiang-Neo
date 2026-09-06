@@ -62,7 +62,7 @@ end, { description = "打招呼", usage = "/hello" })
 
 -- 消息事件回调（返回 consumed, skip_reply）
 -- consumed=true → 消息不进 Agent（不短路，其余插件仍会执行）
--- skip_reply=true → 跳过回复策略检查，强制进入 Agent
+-- skip_reply=true → 标记为必回（mustKeep），跳过参与窗口直接进入 Agent
 function on_message(event)
     if event.raw_message == "ping" then
         return true, false  -- 消费：不进 Agent
@@ -696,7 +696,7 @@ function on_message(event) → (consumed, skip_reply)
 
 **返回值：**
 - `consumed` (bool): `true` → 消息**不进 Agent**。注意：**不短路**——即使某个插件返回 `true`，其余插件的 `on_message` 仍会全部执行完（适合"多个监听插件都要看到消息"的场景）。
-- `skip_reply` (bool): `true` → 跳过回复策略检查（relevance 过滤），**强制进入 Agent 处理**；当 `consumed=true` 时以 `consumed` 为准（消息不进 Agent）。
+- `skip_reply` (bool): `true` → 标记为必回（mustKeep），**跳过参与窗口直接进入 Agent 处理**；当 `consumed=true` 时以 `consumed` 为准（消息不进 Agent）。
 
 > **已移除**：`modified_event`（修改事件）不再支持——插件不得中途改写事件内容（防止上下文失真）。需要拦截/处理消息时，在 `on_message` 中直接调用 `jn.onebot11` API 产生副作用（如 `delete_msg` 撤回、`ban_group_member` 禁言）。
 
@@ -1018,5 +1018,5 @@ Dispatch(raw, event):
 6. **系统插件目录 `system/` 每次启动被二进制覆盖** — 不要用它存自定义命令，自建插件目录
 7. **`database` 权限声称有命名空间隔离，但 `prefixSQL` 是桩未生效** — 任意 SQL，请重度谨慎
 8. **改 Lua 文件不 reload 看不到效果**：`PUT /plugins/:id/toggle` 先停再启才会重新 `DoFile`
-9. **handler 返回值约定** `(consumed, modified_event, skip_reply)`：consumed=true 短路（不调 Agent）；skip_reply=true 跳过回复策略
+9. **handler 返回值约定** `(consumed, skip_reply)`（`modified_event` 已移除）：consumed=true 不进入 Agent（其余插件回调仍会继续执行）；skip_reply=true 标记必回，跳过参与窗口直接进 Agent
 10. **Webhook 与 CronJob 都不走 LLM**：仅喂插件，是外部集成与定时任务的钩子。若要让 Agent 处理外部输入，插件内 `onebot11.send_*_msg` 自己转发

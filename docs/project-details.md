@@ -93,7 +93,7 @@ classDiagram
   class ChatRecord { int64 ID; int64 UserID; string Role; string Content; int TokenCount; JSONMap ToolCalls }
   class ACLRule { int64 ID; ACLScope Scope; ACLPermission Permission; ACLTargetType TargetType; JSONSlice UserIDs }
   class CronJob { string ID; string CronExpr; string Message; string MessageType; int64 TargetID; bool IsActive; time Time LastRunAt }
-  class ReplyStrategyConfig { string ID; ReplyStrategy Strategy; float64 RelevanceThreshold; string BotName; bool StripMarkdown; bool AgentLite; string RelevancePrompt; string RelevanceModel; string JudgeFailPolicy }
+  class ReplyStrategyConfig { string ID; string BotName; bool StripMarkdown; bool AgentLite; int QuietGapSeconds; int ForceCount; int MaxAgeSeconds; int WindowMaxMsgs; int JitterSeconds; int ForceCountJitter; float64 ParticipateProbability; int TypingDelayMaxMs }
   class Plugin { string ID; string Name; string Version; string Path; JSONMap Config; bool IsActive }
   class SkillMemory { string ID; string Content }
   class KnowledgeItem { string ID; string Title; string Content; JSONSlice Keywords; string KeywordStatus }
@@ -111,7 +111,7 @@ classDiagram
 - **`ChatArea`**：私聊/群聊最小隔离单元，是 Session / Memory / ChatRecord / ACLRule 的父级。由首条消息自动 `GetOrCreate` 创建，无手动创建接口。
 - **`ChatRecord`**：`id` 为自增 int64（其他模型多为 UUID）。`Session.AppendRecord` 写 Postgres 与短期记忆 Redis 写入**解耦**——前者为审计/检索，后者为 Agent 上下文窗口。
 - **单行配置**：`Onebot11Adapter`/`WebhookConfig`/`T2IConfig`/`SandboxConfig` 固定 `id=1`，首次访问 DB 不存在时 `InitConfig` 用 `OnConflict DoNothing` 创建默认行。
-- **`ReplyStrategyConfig`**：无 `DeletedAt` 的单例，默认 `strategy=relevance, relevance_threshold=0.5, judge_fail_policy=drop`；策略已收敛为仅 `relevance`（历史 `never_reply`/`at_only`/`always` 启动时自动迁移）。
+- **`ReplyStrategyConfig`**：无 `DeletedAt` 的单例，参与窗口参数：`quiet_gap_seconds=5, force_count=5, max_age_seconds=20, window_max_msgs=20, jitter_seconds=2, force_count_jitter=1, participate_probability=0.8, typing_delay_max_ms=1500`；旧 `strategy`/`relevance_*` 字段已移除（DB 旧列残留无害）。
 - **Prompt `IsSystem`**：启动时 `EnsureSystemPrompt` 幂等播种 `__system_locked__`，强制拼接（顺序 SystemLocked → system → personality → custom）。
 - **Plugin `Manifest.System`**：系统插件三层守卫（Manifest.System + `PluginEngine.IsSystem()` + Service 层 Toggle/Delete）禁删/禁停。
 - **`CronJob`**：不与 ChatArea 建外键；触发时由 `cronjob.Manager` 构造合成 `adapter.Event{PostType:"cronjob", IsCronJob:true}` 经 `CronJobEvents` channel 注入事件循环。
@@ -306,16 +306,13 @@ processEvent 三阶段                                  event.go:81
 │   ev = result.Event (插件可修改事件)
 ├─ Phase 2: 仅 message 事件继续                     event.go:90-92
 │   PostType!="message" || Message==nil → return
-├─ Phase 3: 回复策略检查                             event.go:94-103
-│   skip_reply 标记时跳过检查
-│   getReplySettings(ctx) → checkReplyStrategyFast（恒放行）
-│   策略已收敛为仅 relevance：
-│   @/命令/提及名字 → 派发后由 filterRelevant 规则快路径必回
-│   其余候选 → filterRelevant 批量 LLM 判断
-└─ dispatchToAgent(ctx, ev, rs)                      event.go:104
+├─ Phase 3: 参与窗口派发                              event.go
+│   dispatchToAgent：@/命令/提及名字/私聊 → mustKeep 立即回（丢弃当前窗口）
+│   噪音消息（剥离 CQ 码/URL 后无任何文字，如纯图/纯 sticker）→ 规则丢弃
+│   其余候选 → enqueueParticipation 攒窗（trailing 安静定时器 + 计数/最迟强发）
+└─ releaseWindow → runAgent(ctx, events, chatArea, rs)
     goroutine + ConcurrencyManager.Acquire(chatAreaID)
-    → handleMessage(ctx, ev, chatArea, rs)
-    → ConcurrencyManager.Release(chatAreaID)
+    → handleMessage（整窗一次） → ConcurrencyManager.Release(chatAreaID)
 ```
 
 ### handleMessage（Eino ADK 对话主流程）
@@ -500,16 +497,15 @@ flowchart TD
   P2C -->|是| P3["Phase 3: 回复策略检查"]
   P3 --> P3C{"SkipReply 标记?"}
   P3C -->|是| DA["dispatchToAgent"]
-  P3C -->|否| STR["回复策略（仅 relevance）"]
-  STR -->|恒放行| DA["dispatchToAgent"]
-  DA -->|goroutine| FB["filterRelevant<br/>规则快路径+批量判断/缓存/降级"]
-  FB --> CM["ConcurrencyManager.Acquire"]
-  CM --> HM["handleMessage"]
+  P3C -->|否| DA["dispatchToAgent<br/>@/命令/名字/私聊=立即回<br/>噪音=丢弃<br/>其余=参与窗口攒窗"]
+  DA -->|release| RW["releaseWindow<br/>安静/计数/最迟释放"]
+  RW --> CM["ConcurrencyManager.Acquire"]
+  CM --> HM["handleMessage（整窗一次）"]
   HM --> CMR["ConcurrencyManager.Release"]
 ```
 
 > `isAtSelf`（`reply_strategy.go`）做的是精确 `[CQ:at,qq=<self>]` 匹配；优先用当前 `Adapter.SelfID()` 而非缓存 `SelfQQ`，支持机器人换号后立即生效。
-> relevance 判断优化管线（`filterRelevant` → `relevanceBatchEvaluate`）：@/命令/提及名字 → 必回（0 次 LLM）；噪音消息（纯表情/过短/仅 URL）→ 规则丢弃；其余候选合并为**一次** LLM 批量判断（含图消息标注 `[图片]`，单条候选走原分数判断）。判断结果写 Redis（related=15s 对话轮次放宽 / unrelated=30s 冷却），判断并发全局上限 4、超时可配置（reply_strategy 的 relevance_timeout，默认 10s），失败按 `judge_fail_policy`（drop/reply）降级；群聊刷屏（1s≥5 条）时批窗口拉长到 3s 并降级为只回必回消息。
+> 参与窗口（`dispatchToAgent` → `enqueueParticipation` → `releaseWindow`）：@/命令/提及名字/私聊 → mustKeep 立即回（跳过相关性判断，但仍进 Agent 调用 LLM 生成回复）；噪音消息（剥离 CQ 码/URL 后无任何文字，如纯图/纯 sticker/表情）→ 规则丢弃；其余候选（含 @、剥离 CQ 码/URL 后仍含文字的消息）攒进每群一个窗口；≤2 字短消息与纯 emoji/符号判为噪音丢弃——trailing 安静定时器（来消息即重置，间隔带 `jitter_seconds` 随机抖动）→ 安静释放；或攒够 `force_count`（+`force_count_jitter` 上偏，采样 ∈ [0, force_count_jitter]）条 / 到达 `max_age_seconds` 最迟必发 → 强制释放（不参与概率，保证"攒的话必说"）。释放时整窗一次喂给 Agent，由 LLM 自门控（`__NO_REPLY__`）决定参与/静默；安静释放受 `participate_probability` 约束（1-p 静默放弃本窗）；参与路径发送前可加 `typing_delay_max_ms` 随机"打字延迟"。窗口消息数超 `window_max_msgs` 丢最旧保最新。
 
 ## 一条消息的全程（OneBot11 → 回执）
 

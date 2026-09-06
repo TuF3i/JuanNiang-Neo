@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"JuanNiang-Neo/internal/adapter"
 	"strings"
-	"sync"
 	"testing"
 
 	einoschema "github.com/cloudwego/eino/schema"
@@ -111,79 +109,6 @@ func TestSplitMessagesNewlineNoEmojiMerge(t *testing.T) {
 	joined := strings.Join(parts, "")
 	if !strings.Contains(joined, "😊") {
 		t.Fatalf("emoji 不应丢失: %v", parts)
-	}
-}
-
-// TestGroupEventsByUser 验证按 UserID 分组：不同用户分开、同一用户按原顺序合并。
-func TestGroupEventsByUser(t *testing.T) {
-	ev := func(uid int64) adapter.Event {
-		return adapter.Event{Message: &adapter.MessageEvent{UserID: uid}}
-	}
-	events := []adapter.Event{ev(1), ev(2), ev(1), ev(3), ev(2)}
-	groups := groupEventsByUser(events)
-	if len(groups) != 3 {
-		t.Fatalf("应分成 3 组（用户 1/2/3），实际 %d 组", len(groups))
-	}
-	for _, g := range groups {
-		uid := g[0].Message.UserID
-		for _, e := range g {
-			if e.Message.UserID != uid {
-				t.Fatalf("组内混入了其他用户的消息: %v", g)
-			}
-		}
-	}
-	// 用户 1 的两条消息应按原顺序在同一组
-	for _, g := range groups {
-		if g[0].Message.UserID == 1 && len(g) != 2 {
-			t.Fatalf("用户 1 的两条消息应合并为一组: %v", g)
-		}
-	}
-	// nil Message 的事件被丢弃
-	nilEvs := append(events, adapter.Event{})
-	if got := groupEventsByUser(nilEvs); len(got) != 3 {
-		t.Fatalf("nil Message 应被丢弃，仍为 3 组，实际 %d 组", len(got))
-	}
-}
-
-// TestOrderedReplierOrder 并行处理完成后按 index 顺序投递（乱序到达也按序执行）。
-func TestOrderedReplierOrder(t *testing.T) {
-	r := newOrderedReplier()
-	var mu sync.Mutex
-	var got []int
-	fn := func(i int) func() {
-		return func() {
-			mu.Lock()
-			defer mu.Unlock()
-			got = append(got, i)
-		}
-	}
-
-	// 模拟并行完成：index 乱序到达（2 先完成，然后 0、1）
-	r.Enqueue(2, fn(2))
-	r.Enqueue(0, fn(0))
-	r.Enqueue(1, fn(1))
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 3 {
-		t.Fatalf("应执行 3 个动作，实际 %d: %v", len(got), got)
-	}
-	for i, v := range got {
-		if v != i {
-			t.Fatalf("执行顺序应为 0,1,2，实际 %v", got)
-		}
-	}
-}
-
-// TestOrderedReplierSequential 顺序到达时依次立即执行，不缓存。
-func TestOrderedReplierSequential(t *testing.T) {
-	r := newOrderedReplier()
-	var got []int
-	r.Enqueue(0, func() { got = append(got, 0) })
-	r.Enqueue(1, func() { got = append(got, 1) })
-	r.Enqueue(2, func() { got = append(got, 2) })
-	if len(got) != 3 || got[0] != 0 || got[1] != 1 || got[2] != 2 {
-		t.Fatalf("顺序到达应依次执行: %v", got)
 	}
 }
 

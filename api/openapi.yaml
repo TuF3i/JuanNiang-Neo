@@ -1896,7 +1896,7 @@ paths:
     get:
       tags: [ReplyStrategy]
       summary: 获取回复策略
-      description: 首次 GET 不存在时自动创建默认配置（strategy=always, relevance_threshold=0.5）。
+      description: 首次 GET 不存在时自动创建默认配置（参与窗口参数默认值）。
       responses:
         '200':
           description: 成功
@@ -3784,55 +3784,104 @@ components:
     ReplyStrategyResp:
       type: object
       properties:
-        strategy:
-          type: string
-          enum: [never, at_only, always, relevance]
-        relevance_threshold:
-          type: number
-          format: float
         bot_name:
           type: string
         strip_markdown:
           type: boolean
         agent_lite:
           type: boolean
-        relevance_prompt:
-          type: string
-          description: 相关性检测自定义提示词（空=默认）
-        relevance_model:
-          type: string
-          description: 相关性检测专用 Text Provider ID（空=默认）
-        relevance_timeout:
+        quiet_gap_seconds:
           type: integer
-          description: 相关性检测超时秒数（0=默认 10s）
-        judge_fail_policy:
-          type: string
-          enum: [drop, reply]
+          minimum: 0
+          maximum: 30
+          description: 参与窗口安静间隔（秒），静默超时后整窗参与；0=默认 5s
+        force_count:
+          type: integer
+          minimum: 0
+          maximum: 20
+          description: 插话计数，攒够后无视定时器强发；0=默认 5
+        max_age_seconds:
+          type: integer
+          minimum: 0
+          maximum: 120
+          description: 窗口最迟必发（秒），超时后无视概率直接整窗参与；0=默认 20s
+        window_max_msgs:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: 窗口消息数上限，超出丢最旧；0=默认 20
+        jitter_seconds:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: 安静间隔随机抖动（秒），0=关闭
+        force_count_jitter:
+          type: integer
+          minimum: 0
+          maximum: 5
+          description: 插话计数随机抖动，0=关闭
+        participate_probability:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 安静释放参与概率（0-1），0=从不主动参与
+        typing_delay_max_ms:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: 参与路径发送前随机打字延迟上限（毫秒），0=关闭
 
     UpdateReplyStrategyReq:
       type: object
       properties:
-        strategy:
-          type: string
-          enum: [never, at_only, always, relevance]
-        relevance_threshold:
-          type: number
-          format: float
         bot_name:
           type: string
         strip_markdown:
           type: boolean
         agent_lite:
           type: boolean
-        relevance_prompt:
-          type: string
-        relevance_model:
-          type: string
-        relevance_timeout:
+        quiet_gap_seconds:
           type: integer
-        judge_fail_policy:
-          type: string
-          enum: [drop, reply]
+          minimum: 0
+          maximum: 30
+          description: 安静间隔（秒），0=默认 5s（范围 1-30，越界返回 40032）
+        force_count:
+          type: integer
+          minimum: 0
+          maximum: 20
+          description: 插话计数强发，0=默认 5（范围 2-20，越界返回 40032）
+        max_age_seconds:
+          type: integer
+          minimum: 0
+          maximum: 120
+          description: 最迟必发（秒），0=默认 20s（范围 5-120，越界返回 40032）
+        window_max_msgs:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: 窗口消息数上限，0=默认 20（范围 5-50，越界返回 40032）
+        jitter_seconds:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: 安静间隔随机抖动（秒），0=关闭（范围 0-10，越界返回 40032）
+        force_count_jitter:
+          type: integer
+          minimum: 0
+          maximum: 5
+          description: 插话计数随机抖动，0=关闭（范围 0-5，越界返回 40032）
+        participate_probability:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 安静释放参与概率（0-1），0=从不主动参与（越界返回 40032）
+        typing_delay_max_ms:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: 参与路径发送前随机打字延迟上限（毫秒），0=关闭（范围 0-5000，越界返回 40032）
 
     # ---------- Knowledge ----------
     KnowledgeResp:

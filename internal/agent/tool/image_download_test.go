@@ -14,7 +14,7 @@ import (
 )
 
 // TestImageURLCandidates 候选链覆盖：原始 → HTML 实体解码 → 百分号解码变体。
-// 群聊相关性识图与 vision 工具共用该候选逻辑，任一成功即下载成功。
+// 群聊识图（vision）等工具共用该候选逻辑，任一成功即下载成功。
 func TestImageURLCandidates(t *testing.T) {
 	raw := "https://multimedia.nt.qq.com.cn/download?appid=1407&amp;rkey=CAESM"
 	got := ImageURLCandidates(raw)
@@ -243,7 +243,6 @@ func (f *fakeAdapter) SendGroupMsg(groupID int64, message any) (int64, error) {
 	return 1, nil
 }
 func (f *fakeAdapter) DeleteMsg(messageID int64) error                        { return nil }
-func (f *fakeAdapter) GetMsg(messageID int64) (*adapter.MessageEvent, error)  { return nil, nil }
 func (f *fakeAdapter) GetGroupInfo(groupID int64) (*adapter.GroupInfo, error) { return nil, nil }
 func (f *fakeAdapter) GetGroupMemberList(groupID int64) ([]adapter.GroupMemberInfo, error) {
 	return nil, nil

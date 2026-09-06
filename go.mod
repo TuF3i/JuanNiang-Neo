@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/6tail/lunar-go v1.4.6
 	github.com/RomiChan/websocket v1.4.3-0.20251002072000-d3eb41798438
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/cloudwego/eino v0.9.13
 	github.com/cloudwego/hertz v0.10.5
 	github.com/eino-contrib/jsonschema v1.0.3

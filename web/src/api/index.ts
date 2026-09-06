@@ -295,29 +295,35 @@ export const cronJobApi = {
 }
 
 // ======== Reply Strategy ========
-// 回复策略已收敛为仅 relevance（strategy 字段保留在响应中供兼容，请求不再接受）
+// 参与窗口已取代旧 relevance 相关性判断：@/命令/提及名字/私聊必回，
+// 其余群聊消息攒窗后整窗一次喂给 Agent，由 LLM 自门控（__NO_REPLY__）决定参与或静默。
 
 export interface ReplyStrategyResp {
-  strategy: string
-  relevance_threshold: number
   bot_name: string
   strip_markdown: boolean
   agent_lite: boolean
-  relevance_prompt: string
-  relevance_model: string
-  relevance_timeout: number
-  judge_fail_policy: string
+  quiet_gap_seconds: number
+  force_count: number
+  max_age_seconds: number
+  window_max_msgs: number
+  jitter_seconds: number
+  force_count_jitter: number
+  participate_probability: number
+  typing_delay_max_ms: number
 }
 
 export interface UpdateReplyStrategyReq {
-  relevance_threshold: number
   bot_name: string
   strip_markdown: boolean
   agent_lite: boolean
-  relevance_prompt?: string
-  relevance_model?: string
-  relevance_timeout?: number
-  judge_fail_policy?: string
+  quiet_gap_seconds: number
+  force_count: number
+  max_age_seconds: number
+  window_max_msgs: number
+  jitter_seconds: number
+  force_count_jitter: number
+  participate_probability: number
+  typing_delay_max_ms: number
 }
 
 export const replyStrategyApi = {

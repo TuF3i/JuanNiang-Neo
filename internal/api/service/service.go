@@ -2490,6 +2490,20 @@ func (s *Service) ToggleCronJob(ctx context.Context, c *app.RequestContext) {
 
 // ---------- 回复策略 ----------
 
+// normalizeInt 参与窗口整数参数归一化：非法值直接报错，0=使用默认值。
+func normalizeInt(v, min, max, def int) (int, bool) {
+	if v < 0 {
+		return 0, false
+	}
+	if v == 0 {
+		return def, true
+	}
+	if v < min || v > max {
+		return 0, false
+	}
+	return v, true
+}
+
 func (s *Service) GetReplyStrategy(ctx context.Context, c *app.RequestContext) {
 	cfg, err := s.DAO.ReplyStrategy.GetOrCreate(ctx)
 	if err != nil {
@@ -2497,15 +2511,17 @@ func (s *Service) GetReplyStrategy(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.OK, dto.ReplyStrategyResp{
-		Strategy:           string(cfg.Strategy),
-		RelevanceThreshold: cfg.RelevanceThreshold,
-		BotName:            cfg.BotName,
-		StripMarkdown:      cfg.StripMarkdown,
-		AgentLite:          cfg.AgentLite,
-		RelevancePrompt:    cfg.RelevancePrompt,
-		RelevanceModel:     cfg.RelevanceModel,
-		RelevanceTimeout:   cfg.RelevanceTimeout,
-		JudgeFailPolicy:    cfg.JudgeFailPolicy,
+		BotName:                cfg.BotName,
+		StripMarkdown:          cfg.StripMarkdown,
+		AgentLite:              cfg.AgentLite,
+		QuietGapSeconds:        cfg.QuietGapSeconds,
+		ForceCount:             cfg.ForceCount,
+		MaxAgeSeconds:          cfg.MaxAgeSeconds,
+		WindowMaxMsgs:          cfg.WindowMaxMsgs,
+		JitterSeconds:          cfg.JitterSeconds,
+		ForceCountJitter:       cfg.ForceCountJitter,
+		ParticipateProbability: cfg.ParticipateProbability,
+		TypingDelayMaxMs:       cfg.TypingDelayMaxMs,
 	}))
 }
 
@@ -2516,33 +2532,40 @@ func (s *Service) UpdateReplyStrategy(ctx context.Context, c *app.RequestContext
 		return
 	}
 
-	// 回复策略已收敛为仅 relevance（不再接受 strategy 字段），
-	// 其余相关性参数仍需校验。
-
-	// 验证阈值
-	if data.RelevanceThreshold < 0 || data.RelevanceThreshold > 1 {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "相关性阈值必须在 0-1 之间"}, nil))
+	// 参与窗口整数参数校验（0=默认值，越界 400）
+	var ok bool
+	if data.QuietGapSeconds, ok = normalizeInt(data.QuietGapSeconds, 1, 30, 5); !ok {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "安静间隔必须在 1-30 秒之间（0=默认 5s）"}, nil))
 		return
 	}
-	if data.RelevanceThreshold == 0 {
-		data.RelevanceThreshold = 0.5
-	}
-
-	// 验证相关性判断超时（1-120 秒，0=默认 10s）
-	if data.RelevanceTimeout < 0 || data.RelevanceTimeout > 120 {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "相关性判断超时必须在 1-120 秒之间"}, nil))
+	if data.ForceCount, ok = normalizeInt(data.ForceCount, 2, 20, 5); !ok {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "插话计数强发必须在 2-20 条之间（0=默认 5）"}, nil))
 		return
 	}
-	if data.RelevanceTimeout == 0 {
-		data.RelevanceTimeout = 10
+	if data.MaxAgeSeconds, ok = normalizeInt(data.MaxAgeSeconds, 5, 120, 20); !ok {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "最迟必发必须在 5-120 秒之间（0=默认 20s）"}, nil))
+		return
 	}
-
-	// 验证判断失败策略
-	if data.JudgeFailPolicy == "" {
-		data.JudgeFailPolicy = "drop"
+	if data.WindowMaxMsgs, ok = normalizeInt(data.WindowMaxMsgs, 5, 50, 20); !ok {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "窗口消息数上限必须在 5-50 条之间（0=默认 20）"}, nil))
+		return
 	}
-	if data.JudgeFailPolicy != "drop" && data.JudgeFailPolicy != "reply" {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "判断失败策略只能是 drop 或 reply"}, nil))
+	// 随机抖动字段 0=关闭（合法值，不做 0=默认），仅做范围校验
+	if data.JitterSeconds < 0 || data.JitterSeconds > 10 {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "随机抖动幅度必须在 0-10 秒之间"}, nil))
+		return
+	}
+	if data.ForceCountJitter < 0 || data.ForceCountJitter > 5 {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "计数抖动幅度必须在 0-5 之间"}, nil))
+		return
+	}
+	// 参与概率 0-1（0=从不主动参与，合法值，不做 0=默认）
+	if data.ParticipateProbability < 0 || data.ParticipateProbability > 1 {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "参与概率必须在 0-1 之间"}, nil))
+		return
+	}
+	if data.TypingDelayMaxMs < 0 || data.TypingDelayMaxMs > 5000 {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.Response{Status: 40032, Info: "打字延迟必须在 0-5000 毫秒之间"}, nil))
 		return
 	}
 
@@ -2552,16 +2575,17 @@ func (s *Service) UpdateReplyStrategy(ctx context.Context, c *app.RequestContext
 		return
 	}
 
-	// 策略固定为 relevance（存量老化策略值由启动迁移收敛）
-	cfg.Strategy = models.StrategyRelevance
-	cfg.RelevanceThreshold = data.RelevanceThreshold
 	cfg.BotName = data.BotName
 	cfg.StripMarkdown = data.StripMarkdown
 	cfg.AgentLite = data.AgentLite
-	cfg.RelevancePrompt = data.RelevancePrompt
-	cfg.RelevanceModel = data.RelevanceModel
-	cfg.RelevanceTimeout = data.RelevanceTimeout
-	cfg.JudgeFailPolicy = data.JudgeFailPolicy
+	cfg.QuietGapSeconds = data.QuietGapSeconds
+	cfg.ForceCount = data.ForceCount
+	cfg.MaxAgeSeconds = data.MaxAgeSeconds
+	cfg.WindowMaxMsgs = data.WindowMaxMsgs
+	cfg.JitterSeconds = data.JitterSeconds
+	cfg.ForceCountJitter = data.ForceCountJitter
+	cfg.ParticipateProbability = data.ParticipateProbability
+	cfg.TypingDelayMaxMs = data.TypingDelayMaxMs
 
 	if err := s.DAO.ReplyStrategy.Update(ctx, cfg); err != nil {
 		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.ServerInternalErr, dto.ErrorDetail{ErrorDetail: err.Error()}))
@@ -2574,15 +2598,17 @@ func (s *Service) UpdateReplyStrategy(ctx context.Context, c *app.RequestContext
 	}
 
 	c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.OK, dto.ReplyStrategyResp{
-		Strategy:           string(cfg.Strategy),
-		RelevanceThreshold: cfg.RelevanceThreshold,
-		BotName:            cfg.BotName,
-		StripMarkdown:      cfg.StripMarkdown,
-		AgentLite:          cfg.AgentLite,
-		RelevancePrompt:    cfg.RelevancePrompt,
-		RelevanceModel:     cfg.RelevanceModel,
-		RelevanceTimeout:   cfg.RelevanceTimeout,
-		JudgeFailPolicy:    cfg.JudgeFailPolicy,
+		BotName:                cfg.BotName,
+		StripMarkdown:          cfg.StripMarkdown,
+		AgentLite:              cfg.AgentLite,
+		QuietGapSeconds:        cfg.QuietGapSeconds,
+		ForceCount:             cfg.ForceCount,
+		MaxAgeSeconds:          cfg.MaxAgeSeconds,
+		WindowMaxMsgs:          cfg.WindowMaxMsgs,
+		JitterSeconds:          cfg.JitterSeconds,
+		ForceCountJitter:       cfg.ForceCountJitter,
+		ParticipateProbability: cfg.ParticipateProbability,
+		TypingDelayMaxMs:       cfg.TypingDelayMaxMs,
 	}))
 }
 
