@@ -62,7 +62,7 @@ var (
 		Help: "消息被拦截总数",
 	}, []string{"reason"})
 
-	// DroppedTotal 消息被丢弃数（reason: irrelevant 噪音丢弃 / silenced 群聊静默）。
+	// DroppedTotal 消息被丢弃数（reason: irrelevant 相关性丢弃 / silenced 群聊静默 / flood 刷屏降级）。
 	DroppedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "juanniang_message_dropped_total",
 		Help: "消息被丢弃总数",
@@ -112,35 +112,6 @@ var (
 	})
 )
 
-// ---------- 参与窗口 ----------
-
-var (
-	// WindowReleasesTotal 参与窗口释放次数（reason: quiet 安静 / force_count 插话计数强发 / max_age 最迟必发）。
-	WindowReleasesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "juanniang_participation_window_releases_total",
-		Help: "参与窗口释放总数（按释放原因）",
-	}, []string{"reason"})
-
-	// WindowDroppedTotal 参与窗口丢弃消息数（reason: window_silenced 概率静默 / window_discarded mustKeep 丢窗 / overflow 窗口溢出丢最旧）。
-	WindowDroppedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "juanniang_participation_window_dropped_total",
-		Help: "参与窗口丢弃消息总数",
-	}, []string{"reason"})
-
-	// AgentParticipationTotal 参与模式 Agent 处理结果（result: reply 参与回复 / silent 静默 __NO_REPLY__）。
-	AgentParticipationTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "juanniang_agent_participation_total",
-		Help: "参与模式 Agent 处理结果总数",
-	}, []string{"result"})
-
-	// QuoteEnrichTotal 引用消息富化分支决策结果（result: no_segment / short_injected /
-	// long_pass_id / fallback_embedded / kept_cq / dup_in_batch）。
-	QuoteEnrichTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "juanniang_quote_enrich_total",
-		Help: "引用消息富化分支决策总数",
-	}, []string{"result"})
-)
-
 // ---------- LLM 用量 ----------
 
 var (
@@ -150,7 +121,7 @@ var (
 		Help: "LLM 调用总数",
 	}, []string{"provider", "result"})
 
-	// LLMTokensTotal Token 消耗按用途（phase: agent 对话循环 / review 群管理审核）。
+	// LLMTokensTotal Token 消耗按用途（phase: agent 对话循环 / review 群管理审核 / relevance 相关性判断）。
 	LLMTokensTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "juanniang_llm_tokens_total",
 		Help: "LLM Token 消耗总数",
@@ -260,7 +231,6 @@ func init() {
 		GroupMgrLLMReviewsTotal, GroupMgrSpamTotal,
 		RAGSearchLatency, RAGSearchErrorsTotal,
 		PluginHookErrorsTotal, PluginHookDuration,
-		WindowReleasesTotal, WindowDroppedTotal, AgentParticipationTotal, QuoteEnrichTotal,
 		HTTPRequestsTotal, HTTPRequestDuration,
 		ChatRepliesTotal, ChatStatsDroppedTotal,
 		&runtimeCollector{},
