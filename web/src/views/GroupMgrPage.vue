@@ -71,7 +71,6 @@
               <v-card-item><template #title><span class="text-h6 font-weight-bold">违禁语录</span></template></v-card-item>
               <v-card-text class="d-flex flex-column">
                 <div class="d-flex justify-space-between py-2"><span class="text-medium-emphasis">黑名单语录</span><span class="text-body-2">{{ blackPhrases.length }} 条（已同步 RAG {{ blackPhrases.filter(p => p.rag_synced).length }}）</span></div>
-                <div class="d-flex justify-space-between py-2"><span class="text-medium-emphasis">白名单语录</span><span class="text-body-2">{{ whitePhrases.length }} 条（已同步 RAG {{ whitePhrases.filter(p => p.rag_synced).length }}）</span></div>
                 <div class="d-flex justify-space-between py-2"><span class="text-medium-emphasis">RAG 同步</span>
                   <v-chip size="x-small" :color="ragHealthy ? 'success' : 'default'">{{ ragHealthy ? '可用' : '未配置/不可达（降级关键词兜底）' }}</v-chip>
                 </div>
@@ -112,14 +111,10 @@
                 </div>
               </v-col>
               <v-col cols="12" md="6">
-                <div class="text-body-2 text-medium-emphasis mb-2">RAG 语义判定阈值（命中黑名单且 score ≥ 黑名单最低分 → 处罚；命中白名单且 score ≥ 白名单最低分 → 放行；均未命中 → LLM 批量判定）</div>
+                <div class="text-body-2 text-medium-emphasis mb-2">RAG 语义判定阈值（命中黑名单且 score ≥ 黑名单最低分 → 按类型处罚；未命中/未达阈值 → LLM 批量判定）</div>
                 <div class="mb-1">
                   <div class="d-flex justify-space-between"><span class="text-body-2">黑名单最低分</span><span class="text-body-2 font-weight-bold">{{ form.black_min_score.toFixed(2) }}</span></div>
                   <v-slider v-model="form.black_min_score" min="0.5" max="1" step="0.05" color="error" hide-details @update:model-value="markDirty" />
-                </div>
-                <div class="mb-1">
-                  <div class="d-flex justify-space-between"><span class="text-body-2">白名单最低分</span><span class="text-body-2 font-weight-bold">{{ form.white_min_score.toFixed(2) }}</span></div>
-                  <v-slider v-model="form.white_min_score" min="0.5" max="1" step="0.05" color="success" hide-details @update:model-value="markDirty" />
                 </div>
                 <div class="d-flex align-center justify-space-between py-1">
                   <span class="text-body-2">LLM 判定批窗口（秒）</span>
@@ -156,10 +151,6 @@
                 <div class="d-flex align-center justify-space-between py-1">
                   <span class="text-body-2">二次违规禁言时长（秒）</span>
                   <v-text-field v-model.number="form.violation_mute_seconds" type="number" min="1" density="compact" hide-details style="max-width:140px" @update:model-value="markDirty" />
-                </div>
-                <div class="d-flex align-center justify-space-between py-1">
-                  <span class="text-body-2">白名单语录 GC 周期（天）</span>
-                  <v-text-field v-model.number="form.white_gc_interval_days" type="number" min="1" density="compact" hide-details style="max-width:140px" @update:model-value="markDirty" />
                 </div>
               </v-col>
             </v-row>
@@ -206,10 +197,6 @@
             <template #title><span class="text-h6 font-weight-bold">违禁语录列表</span></template>
             <template #append>
               <div class="d-flex align-center ga-2">
-                <v-btn-toggle v-model="phraseListType" density="compact" class="me-2" @update:model-value="loadPhrases">
-                  <v-btn value="black" size="small">黑名单</v-btn>
-                  <v-btn value="white" size="small">白名单</v-btn>
-                </v-btn-toggle>
                 <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" @click="phraseDialog = true">添加语录</v-btn>
                 <v-btn color="info" variant="tonal" prepend-icon="mdi-cloud-sync-outline" :loading="syncing" @click="syncRAG">同步向量数据库</v-btn>
               </div>
@@ -233,10 +220,9 @@
                 <span class="text-body-2">{{ item.text }}</span>
               </template>
               <template #item.category="{ item }">
-                <v-chip v-if="item.list_type !== 'white'" size="x-small" :color="item.category === 'sensitive' ? 'purple' : 'deep-orange'">
+                <v-chip size="x-small" :color="item.category === 'sensitive' ? 'purple' : 'deep-orange'">
                   {{ item.category === 'sensitive' ? '敏感' : '广告' }}
                 </v-chip>
-                <span v-else class="text-caption text-medium-emphasis">—</span>
               </template>
               <template #item.source="{ item }">
                 <span class="text-caption">{{ sourceLabel(item.source) }}</span>
@@ -255,7 +241,7 @@
               </template>
             </v-data-table>
             <div v-if="!phraseList.length" class="text-caption text-medium-emphasis pa-4 text-center">
-              {{ phraseListType === 'black' ? '黑名单' : '白名单' }}暂无语录，点击右上角「添加语录」或从 txt 文件导入（一行一个）
+              黑名单暂无语录，点击右上角「添加语录」或从 txt 文件导入（一行一个）
             </div>
           </v-card-text>
         </v-card>
@@ -263,7 +249,7 @@
         <!-- 添加语录对话框 -->
         <v-dialog v-model="phraseDialog" max-width="560">
           <v-card>
-            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-plus-circle-outline</v-icon>添加语录（{{ phraseListType === 'white' ? '白名单' : '黑名单' }}）</v-card-title>
+            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-plus-circle-outline</v-icon>添加语录（黑名单）</v-card-title>
             <v-card-text>
               <v-radio-group v-model="phraseForm.mode" density="compact" class="mb-1">
                 <v-radio label="输入语录" value="input" />
@@ -278,7 +264,7 @@
                 class="mb-3"
                 placeholder="例如：加我好友送全套资料"
               />
-              <v-radio-group v-if="phraseListType !== 'white'" v-model="phraseForm.category" density="compact" class="mb-1">
+              <v-radio-group v-model="phraseForm.category" density="compact" class="mb-1">
                 <v-radio label="广告违规" value="ad" />
                 <v-radio label="敏感词违规" value="sensitive" />
               </v-radio-group>
@@ -356,7 +342,6 @@
               <div class="d-flex flex-wrap ga-2 mb-2">
                 <v-chip size="small" :color="testReport.rag_ok ? 'success' : 'default'">RAG 可用: {{ testReport.rag_ok }}</v-chip>
                 <v-chip v-if="testReport.black_score !== null && testReport.black_score !== undefined" size="small" color="error">黑名单命中: {{ testReport.black_score.toFixed(3) }}</v-chip>
-                <v-chip v-if="testReport.white_score !== null && testReport.white_score !== undefined" size="small" color="success">白名单命中: {{ testReport.white_score.toFixed(3) }}</v-chip>
                 <v-chip v-if="testReport.word" size="small" color="warning">兜底词: {{ testReport.word }}</v-chip>
                 <v-chip v-if="testReport.card" size="small" color="error">推荐卡片</v-chip>
               </div>
@@ -442,7 +427,6 @@ const form = ref<GroupMgrConfigResp>({
   enabled: false,
   llm_review: true,
   black_min_score: 0.7,
-  white_min_score: 0.75,
   llm_batch_window: 3,
   img_spam_window: 2,
   img_spam_threshold: 3,
@@ -455,7 +439,6 @@ const form = ref<GroupMgrConfigResp>({
   llm_criteria: '',
   llm_gray_prompt: '',
   llm_high_risk_prompt: '',
-  white_gc_interval_days: 7,
 })
 const savingCfg = ref(false)
 function markDirty() { /* 参数保存为显式按钮，无需脏标记 */ }
@@ -467,7 +450,6 @@ async function loadConfig() {
       enabled: res.enabled,
       llm_review: res.llm_review,
       black_min_score: res.black_min_score ?? 0.7,
-      white_min_score: res.white_min_score ?? 0.75,
       llm_batch_window: res.llm_batch_window ?? 3,
       img_spam_window: res.img_spam_window ?? 2,
       img_spam_threshold: res.img_spam_threshold ?? 3,
@@ -480,7 +462,6 @@ async function loadConfig() {
       llm_criteria: res.llm_criteria ?? '',
       llm_gray_prompt: res.llm_gray_prompt ?? '',
       llm_high_risk_prompt: res.llm_high_risk_prompt ?? '',
-      white_gc_interval_days: res.white_gc_interval_days ?? 7,
     }
   } catch (e: any) {
     toastStore.error(e?.message || '加载配置失败')
@@ -507,7 +488,6 @@ function buildConfigReq() {
     enabled: f.enabled,
     llm_review: f.llm_review,
     black_min_score: Number(f.black_min_score) || 0.7,
-    white_min_score: Number(f.white_min_score) || 0.75,
     llm_batch_window: Number(f.llm_batch_window) || 3,
     img_spam_window: Number(f.img_spam_window) || 2,
     img_spam_threshold: Number(f.img_spam_threshold) || 3,
@@ -520,7 +500,6 @@ function buildConfigReq() {
     llm_criteria: f.llm_criteria,
     llm_gray_prompt: f.llm_gray_prompt,
     llm_high_risk_prompt: f.llm_high_risk_prompt,
-    white_gc_interval_days: Number(f.white_gc_interval_days) || 7,
   }
 }
 
@@ -574,7 +553,6 @@ async function loadSystemAdmins() {
 
 // ---------- 违禁语录 ----------
 const allPhrases = ref<GroupMgrSampleResp[]>([])
-const phraseListType = ref<'black' | 'white'>('black')
 const syncing = ref(false)
 const ragHealthy = ref(false)
 // SSE 流式同步进度（语录量大时避免单次 HTTP 超时，逐批推送实时进度）
@@ -586,8 +564,7 @@ const phraseForm = ref<{ mode: string; input: string; file: File[]; category: st
 })
 
 const blackPhrases = computed(() => allPhrases.value.filter(p => p.list_type !== 'white'))
-const whitePhrases = computed(() => allPhrases.value.filter(p => p.list_type === 'white'))
-const phraseList = computed(() => phraseListType.value === 'white' ? whitePhrases.value : blackPhrases.value)
+const phraseList = blackPhrases // 白名单语录体系已剔除，列表恒为黑名单
 
 const phraseHeaders = [
   { title: '语录', key: 'text' },
@@ -620,13 +597,12 @@ async function checkRAGHealth() {
 }
 
 async function submitPhraseDialog() {
-  const listType = phraseListType.value
   if (phraseForm.value.mode === 'input') {
     const lines = phraseForm.value.input.split('\n').map(s => s.trim()).filter(Boolean)
     if (!lines.length) { toastStore.error('请输入语录'); return }
     addingPhrases.value = true
     try {
-      for (const t of lines) await groupMgrApi.addPhrase(t, listType, phraseForm.value.category)
+      for (const t of lines) await groupMgrApi.addPhrase(t, phraseForm.value.category)
       toastStore.success(`已添加 ${lines.length} 条语录`)
       phraseDialog.value = false
       phraseForm.value.input = ''
@@ -638,7 +614,7 @@ async function submitPhraseDialog() {
     if (!phraseForm.value.file?.length) { toastStore.error('请选择 txt 文件'); return }
     addingPhrases.value = true
     try {
-      const res = (await groupMgrApi.importPhrases(phraseForm.value.file[0], listType, phraseForm.value.category)).data.data
+      const res = (await groupMgrApi.importPhrases(phraseForm.value.file[0], phraseForm.value.category)).data.data
       toastStore.success(`导入完成：成功 ${res?.imported ?? 0} 条，跳过 ${res?.skipped ?? 0} 条`)
       phraseDialog.value = false
       phraseForm.value.file = []

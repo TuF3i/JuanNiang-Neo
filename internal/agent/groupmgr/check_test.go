@@ -200,8 +200,8 @@ func TestLLMFailClosed(t *testing.T) {
 	}
 }
 
-// TestLLMBatchPerItemVerdict 批量判定逐条独立：同批两条分别判 black/white，
-// 各自走处罚/放行+学习，互不串扰。
+// TestLLMBatchPerItemVerdict 批量判定逐条独立：同批两条分别判 black/none，
+// 各自走处罚+学习/放行，互不串扰。
 func TestLLMBatchPerItemVerdict(t *testing.T) {
 	m, gmdao := newTestManager(t, nil)
 	ctx := context.Background()
@@ -212,30 +212,44 @@ func TestLLMBatchPerItemVerdict(t *testing.T) {
 			{groupID: 100, userID: 300, messageID: 2, pk: "100:300", rc: reviewCtx{}, rawText: "明天一起食堂吃饭吗"},
 		},
 		results: []reviewResult{
-			{Index: 0, Verdict: "black", Reason: "广告引流"},
-			{Index: 1, Verdict: "white", Reason: "同学日常交流"},
+			{Index: 0, Verdict: "black", Category: "sensitive", Reason: "辱骂违规"},
+			{Index: 1, Verdict: "none", Reason: "同学日常交流"},
 		},
 	})
 	// 黑名单判定 → 处罚
 	if c, _ := gmdao.ViolationGet(ctx, 100, 200); c != 1 {
 		t.Fatalf("判 black 应处罚，count = %d", c)
 	}
-	// 白名单判定 → 放行（无违规记录）
+	// none 判定 → 放行（无违规记录）
 	if c, _ := gmdao.ViolationGet(ctx, 100, 300); c != 0 {
-		t.Fatalf("判 white 应放行，count = %d", c)
+		t.Fatalf("判 none 应放行，count = %d", c)
 	}
-	// 学习闭环（异步）：等待黑白语录各入库一条
+	// 学习闭环（异步）：仅判黑消息入库（按 LLM 判定类型），none 不学习。
+	// 等待目标是学习语录本身（种子语录已存在，不能以 black 总数为条件）。
+	var learned *models.GroupMgrSample
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		bl, _ := gmdao.SampleListByList(ctx, "black")
-		wl, _ := gmdao.SampleListByList(ctx, "white")
-		if len(bl) >= 1 && len(wl) >= 1 {
+		for i := range bl {
+			if bl[i].Text == "办卡加群，加我微信领流量卡" {
+				learned = &bl[i]
+			}
+		}
+		if learned != nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("学习语录异步入库超时：black=%d white=%d", len(bl), len(wl))
+			t.Fatalf("学习语录异步入库超时：black=%d", len(bl))
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if learned.Category != "sensitive" {
+		t.Fatalf("学习语录应按 LLM 判定类型入库（sensitive），got %q", learned.Category)
+	}
+	// none 消息不得学习入库（库中仅种子语录 + 判黑学习语录两条）
+	all, _ := gmdao.SampleListAll(ctx)
+	if len(all) != 2 {
+		t.Fatalf("none 消息不应学习入库，样本应 2 条（种子+学习），got %d", len(all))
 	}
 }
 

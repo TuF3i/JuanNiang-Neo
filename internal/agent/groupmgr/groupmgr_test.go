@@ -27,12 +27,12 @@ import (
 )
 
 // newTestManager 构造测试 Manager：sqlite 内存库 + 可选 mock RAG server（score 可定制）。
-// 默认 mock 命中黑名单语录（ragtag.Sample）；white=true 时命中白名单语录（ragtag.WhitePhrase）。
+// mock 命中黑名单语录（ragtag.Sample("1")）。
 func newTestManager(t *testing.T, ragScore *float64) (*Manager, *dao.GroupMgrDAO) {
-	return newTestManagerEx(t, ragScore, false)
+	return newTestManagerEx(t, ragScore)
 }
 
-func newTestManagerEx(t *testing.T, ragScore *float64, white bool) (*Manager, *dao.GroupMgrDAO) {
+func newTestManagerEx(t *testing.T, ragScore *float64) (*Manager, *dao.GroupMgrDAO) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -59,12 +59,8 @@ func newTestManagerEx(t *testing.T, ragScore *float64, white bool) (*Manager, *d
 				return
 			}
 			// 返回一个命中：tag 与下方插入的语录行（首个自增 ID=1）对齐
-			tag := ragtag.Sample("1")
-			if white {
-				tag = ragtag.WhitePhrase("1")
-			}
 			_ = json.NewEncoder(w).Encode(caller.SearchResponse{Results: []caller.SearchHit{
-				{Tag: tag, Score: *ragScore},
+				{Tag: ragtag.Sample("1"), Score: *ragScore},
 			}})
 		}))
 		t.Cleanup(srv.Close)
@@ -75,12 +71,8 @@ func newTestManagerEx(t *testing.T, ragScore *float64, white bool) (*Manager, *d
 	}
 
 	m := New(gmdao, adapter.New(adapter.Config{}), func() *caller.Client { return ragCli }, provider.NewProviderGroup())
-	// 语录候选集：插入一条语录（ID=1，与 mock 命中 tag 对齐）
-	if white {
-		if _, err := gmdao.SampleAddPhrase(context.Background(), "明天一起食堂吃饭吗", "ok", "seed", "white"); err != nil {
-			t.Fatalf("seed white phrase: %v", err)
-		}
-	} else if _, err := gmdao.SampleAdd(context.Background(), "办卡加群办套餐", "ad", "seed"); err != nil {
+	// 语录候选集：插入一条黑名单语录（ID=1，与 mock 命中 tag 对齐）
+	if _, err := gmdao.SampleAdd(context.Background(), "办卡加群办套餐", "ad", "seed"); err != nil {
 		t.Fatalf("seed sample: %v", err)
 	}
 	// Init：默认配置 + 种子词库导入 + 内存缓存加载
@@ -129,7 +121,7 @@ func TestViolationRAGMidScoreReview(t *testing.T) {
 		t.Fatal("RAG 应可用")
 	}
 	if rep.Verdict != "review" {
-		t.Fatalf("未达黑白阈值应 review（LLM 判定），got %s (%s)", rep.Verdict, rep.Reason)
+		t.Fatalf("未达黑名单阈值应 review（LLM 判定），got %s (%s)", rep.Verdict, rep.Reason)
 	}
 }
 
@@ -138,49 +130,39 @@ func TestViolationRAGLowScoreReview(t *testing.T) {
 	m, _ := newTestManager(t, &score)
 	rep := m.TestViolation(context.Background(), "明天要交作业了吗")
 	if rep.Verdict != "review" {
-		t.Fatalf("低分未命中黑白 → LLM 判定，got %s (%s)", rep.Verdict, rep.Reason)
+		t.Fatalf("低分未命中黑名单 → LLM 判定，got %s (%s)", rep.Verdict, rep.Reason)
 	}
 }
 
-func TestViolationRAGWhitePhrasePass(t *testing.T) {
-	score := 0.92
-	m, _ := newTestManagerEx(t, &score, true) // mock 命中白名单语录
-	rep := m.TestViolation(context.Background(), "明天一起食堂吃饭吗")
-	if !rep.RAGOK {
-		t.Fatal("RAG 应可用")
-	}
-	if rep.WhiteScore < 0.9 {
-		t.Fatalf("white_score 应上报最高分，got %f", rep.WhiteScore)
-	}
-	if rep.Verdict != "pass" {
-		t.Fatalf("白名单高置信应放行，got %s (%s)", rep.Verdict, rep.Reason)
-	}
-}
-
-// TestPhraseTouchIncrHit 回归：白名单语录命中放行后 hit_count 必须递增（此前只更新 last_used_at，
-// 命中次数不涨导致面板「命中次数」对白名单恒为 0）。
-func TestPhraseTouchIncrHit(t *testing.T) {
-	m, gmdao := newTestManagerEx(t, nil, true) // 预置白名单语录 ID=1
+// TestBuildPhraseSetSkipsLegacyWhite 回归：白名单语录体系剔除后，存量 list_type='white'
+// 行必须被候选集跳过——不得进入黑名单集合（防止历史白语录被语义命中造成误罚），
+// 也不得缓存空集（否则正常黑名单语录同步后无法重建候选集）。
+func TestBuildPhraseSetSkipsLegacyWhite(t *testing.T) {
+	m, gmdao := newTestManagerEx(t, nil)
 	ctx := context.Background()
-	if set := m.buildPhraseSet(ctx); set == nil || len(set.white) == 0 {
-		t.Fatal("候选集应含白名单语录")
+	// 追加一条存量白名单语录（ID=2），模拟剔除前的历史数据
+	if _, err := gmdao.SampleAddPhrase(ctx, "明天一起食堂吃饭吗", "ok", "seed", "white"); err != nil {
+		t.Fatalf("seed legacy white phrase: %v", err)
 	}
-	// 触发一次白名单命中（放行路径的 touch 逻辑）
-	m.phraseTouch(ctx, ragtag.WhitePhrase("1"))
-	samples, err := gmdao.SampleListAll(ctx)
-	if err != nil {
-		t.Fatal(err)
+	set := m.buildPhraseSet(ctx)
+	if set == nil {
+		t.Fatal("候选集构建失败")
 	}
-	if len(samples) != 1 {
-		t.Fatalf("样本应 1 条，got %d", len(samples))
+	if len(set.black) != 1 {
+		t.Fatalf("候选集应只含 1 条黑名单语录，got %d", len(set.black))
 	}
-	if samples[0].HitCount != 1 {
-		t.Fatalf("白名单命中后 hit_count 应为 1，got %d", samples[0].HitCount)
+	for tag := range set.black {
+		if tag == ragtag.Sample("2") {
+			t.Fatal("白名单语录不应进入候选集")
+		}
 	}
-	if samples[0].LastUsedAt == nil {
-		t.Fatal("白名单命中后 last_used_at 应更新")
+	if _, ok := set.black[ragtag.Sample("1")]; !ok {
+		t.Fatal("黑名单语录应在候选集中")
 	}
 }
+
+// 候选集外 tag（存量白语录 wt: 向量 / 外来数据）的检索命中忽略机制，
+// 由 TestRAGForeignTagNotMatched 覆盖（同一代码路径：owned.black 查不到即忽略）。
 
 // TestViolationDoesNotObserveMetrics 回归：链路测试（TestViolation）不得观测生产指标
 // （RAGSearchLatency / GroupMgrRAGScore / RAGSearchErrorsTotal），否则面板反复粘贴文本

@@ -75,8 +75,8 @@ func TestViolationRAGAvailableNoPhraseHit(t *testing.T) {
 	if rep.Verdict != "review" {
 		t.Fatalf("无语录命中应送 LLM 判定（review），got %s (%s)", rep.Verdict, rep.Reason)
 	}
-	if rep.BlackScore != 0 || rep.WhiteScore != 0 {
-		t.Fatalf("外来 tag 命中不应计入黑白分数，black=%f white=%f", rep.BlackScore, rep.WhiteScore)
+	if rep.BlackScore != 0 {
+		t.Fatalf("外来 tag 命中不应计入黑名单分数，black=%f", rep.BlackScore)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestVerifyRAGForeignHitIsAvailable(t *testing.T) {
 	if !v.ok {
 		t.Fatal("RAG 服务可用（外来 tag 命中）应 ok=true")
 	}
-	if v.black != nil || v.white != nil {
-		t.Fatalf("外来 tag 不应产生黑白命中，black=%v white=%v", v.black, v.white)
+	if v.black != nil {
+		t.Fatalf("外来 tag 不应产生黑名单命中，black=%v", v.black)
 	}
 }

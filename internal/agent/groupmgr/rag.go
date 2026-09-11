@@ -28,28 +28,26 @@ const ragSearchPhraseK = 15
 const ragSearchTimeout = 5 * time.Second
 
 // phraseInfo 语录候选集条目（tag → 集合/ID/文本/类别，命中归类与反查用）。
-// listType: black（黑名单，命中处罚）/ white（白名单，命中放行）。
 type phraseInfo struct {
-	listType string
 	id       uint
 	text     string
 	category string
 }
 
-// phraseSet 黑白语录候选集（tag → 条目）。
+// phraseSet 黑名单语录候选集（tag → 条目）。
+// 白名单语录体系已剔除：存量 list_type='white' 行在构建时跳过（不删除数据，
+// 但不得进入黑名单候选集，防止历史白语录被语义命中造成误罚）。
 type phraseSet struct {
 	black map[uuid.UUID]phraseInfo
-	white map[uuid.UUID]phraseInfo
 }
 
-// buildPhraseSet 构建语录候选集（本地 语录ID → 派生 tag），供检索命中归类
-// 黑白集合与反查本地 ID（scoop 内命中也可能是白/黑兼有，需按 tag 归类）。
+// buildPhraseSet 构建语录候选集（本地 语录ID → 派生 tag），供检索命中归类与反查本地 ID。
 // 返回 nil 表示构建失败（调用方降级）。空集合不缓存：首次为空时缓存 5 分钟
 // 会导致同步向量库后仍降级（空 map != nil 绕过 TTL 检查）。
 func (m *Manager) buildPhraseSet(ctx context.Context) *phraseSet {
 	m.sampleMu.Lock()
 	defer m.sampleMu.Unlock()
-	if m.sampleSet != nil && (len(m.sampleSet.black) > 0 || len(m.sampleSet.white) > 0) && time.Since(m.sampleSetAt) < sampleSetTTL {
+	if m.sampleSet != nil && len(m.sampleSet.black) > 0 && time.Since(m.sampleSetAt) < sampleSetTTL {
 		return m.sampleSet
 	}
 	samples, err := m.dao.SampleListAll(ctx)
@@ -57,17 +55,16 @@ func (m *Manager) buildPhraseSet(ctx context.Context) *phraseSet {
 		log.Warn("语录候选集构建失败，RAG 降级", "err", err)
 		return nil
 	}
-	set := &phraseSet{black: make(map[uuid.UUID]phraseInfo), white: make(map[uuid.UUID]phraseInfo)}
+	set := &phraseSet{black: make(map[uuid.UUID]phraseInfo)}
 	for _, s := range samples {
-		info := phraseInfo{listType: s.ListType, id: s.ID, text: s.Text, category: s.Category}
+		// 存量白名单语录跳过：不参与黑名单候选集（数据保留不清理）
 		if s.ListType == "white" {
-			set.white[ragtag.WhitePhrase(u32s(s.ID))] = info
-		} else {
-			set.black[ragtag.Sample(u32s(s.ID))] = info
+			continue
 		}
+		set.black[ragtag.Sample(u32s(s.ID))] = phraseInfo{id: s.ID, text: s.Text, category: s.Category}
 	}
 	// 空集合不缓存：同步向量库后应立即重新构建
-	if len(set.black) == 0 && len(set.white) == 0 {
+	if len(set.black) == 0 {
 		m.sampleSet = nil // 不缓存空集，下次调用重新查 DB
 		return set
 	}
@@ -76,9 +73,8 @@ func (m *Manager) buildPhraseSet(ctx context.Context) *phraseSet {
 	return set
 }
 
-// phraseMatch 一次 RAG 检索后黑白最佳命中。
+// phraseMatch 黑名单最佳命中。
 type phraseMatch struct {
-	listType string // black / white
 	tag      uuid.UUID
 	id       uint
 	score    float64
@@ -88,19 +84,18 @@ type phraseMatch struct {
 
 // ragVerdict RAG 语义匹配结果。
 type ragVerdict struct {
-	// ok 表示 RAG 路径可用且已完成检索；false = 不可用/无候选（调用方降级关键词）
+	// ok 表示 RAG 路径可用且已完成检索；false = 不可用/无候选（调用方降级）
 	ok bool
-	// black / white 为对应集合的最佳命中（未达阈值仍可能非 nil，由调用方按阈值判定）
+	// black 为黑名单最佳命中（未达阈值仍可能非 nil，由调用方按阈值判定）
 	black *phraseMatch
-	white *phraseMatch
 }
 
-// verifyByRAG RAG 语义匹配（第一核实人）：消息文本在黑/白语录集内各取最优命中。
+// verifyByRAG RAG 语义匹配（第一核实人）：消息文本在黑名单语录集内取最优命中。
 // ok 只表示 RAG 服务可用且已完成检索（调用方据此决定是否走 RAG 路径）；
-// black/white 可能均为 nil（服务正常但无语录命中 → 送 LLM 判定，而不是降级关键词）。
+// black 可能为 nil（服务正常但无命中 → 送 LLM 判定，而不是降级关键词）。
 // observe=false 跳过全部指标上报（链路测试/诊断路径，避免污染生产面板数据）。
 func (m *Manager) verifyByRAG(ctx context.Context, query string, observe bool) (v ragVerdict) {
-	// 链路追踪：RAG 语义核实 span（黑白双集合一次检索，记录最高分）。
+	// 链路追踪：RAG 语义核实 span（记录黑名单最高分）。
 	// 用新 ctx 调 Search：rag.search span 需嵌套在 verify_rag 下（而非平级）。
 	ctx, span := otelx.Span(ctx, "groupmgr.verify_rag",
 		attribute.String("query_head", headText(query, 30)),
@@ -109,9 +104,6 @@ func (m *Manager) verifyByRAG(ctx context.Context, query string, observe bool) (
 		span.SetAttributes(attribute.Bool("ok", v.ok))
 		if v.black != nil {
 			span.SetAttributes(attribute.Float64("black_score", v.black.score))
-		}
-		if v.white != nil {
-			span.SetAttributes(attribute.Float64("white_score", v.white.score))
 		}
 		span.End()
 	}()
@@ -139,32 +131,21 @@ func (m *Manager) verifyByRAG(ctx context.Context, query string, observe bool) (
 			metrics.RAGSearchErrorsTotal.Inc()
 		}
 		log.Warn("RAG 检索失败，降级", "err", err)
-		return v // 检索出错 → 不可用（降级关键词）
+		return v // 检索出错 → 不可用（降级）
 	}
-	// RAG 服务可用（即使无命中）：ok=true，black/white 由命中决定
+	// RAG 服务可用（即使无命中）：ok=true，black 由命中决定
 	v = ragVerdict{ok: true}
 	for _, h := range hits {
+		// 候选集外的 tag（存量白语录 wt: 向量 / 外来数据）忽略，不计入命中
 		if info, ok := owned.black[h.Tag]; ok {
 			if v.black == nil || h.Score > v.black.score {
-				v.black = &phraseMatch{listType: "black", tag: h.Tag, id: info.id, score: h.Score, text: info.text, category: info.category}
-			}
-			continue
-		}
-		if info, ok := owned.white[h.Tag]; ok {
-			if v.white == nil || h.Score > v.white.score {
-				v.white = &phraseMatch{listType: "white", tag: h.Tag, id: info.id, score: h.Score, text: info.text, category: info.category}
+				v.black = &phraseMatch{tag: h.Tag, id: info.id, score: h.Score, text: info.text, category: info.category}
 			}
 		}
 	}
-	// RAG 核实分数分布（调阈值依据）：黑白各报最优分，命中即观测
-	// （重构后曾丢失该上报，导致 Grafana 分数分布面板无数据）；链测路径不观测
-	if observe {
-		if v.black != nil {
-			metrics.GroupMgrRAGScore.Observe(v.black.score)
-		}
-		if v.white != nil {
-			metrics.GroupMgrRAGScore.Observe(v.white.score)
-		}
+	// RAG 核实分数分布（调阈值依据）：命中即观测；链测路径不观测
+	if observe && v.black != nil {
+		metrics.GroupMgrRAGScore.Observe(v.black.score)
 	}
 	return v
 }
@@ -192,16 +173,17 @@ func (m *Manager) syncRAGProgress(ctx context.Context, onProgress func(done, fai
 		return 0, 0, err
 	}
 
-	// 仅同步样本表（违禁语录）：词条不再派生样本，不写词条向量。
+	// 仅同步黑名单语录（GroupMgrSample）到 RAG 向量库；
+	// 存量白名单语录跳过（体系已剔除，数据保留不清理、不再产生 wt: 向量）；
+	// 关键词词库不入 DB/RAG/samples（仅内存兜底，从 go:embed txt 加载），不在此同步。
 	total, failed := 0, 0
 	seed := make([]caller.BatchItem, 0, len(samples))
 	sampleTagOf := make(map[uuid.UUID]uint, len(samples)) // tag → 语录 ID
 	for _, s := range samples {
-		// 语录 tag 按集合选择：白名单语录用 WhitePhrase 前缀（检索侧按前缀归类）
-		tag := ragtag.Sample(u32s(s.ID))
 		if s.ListType == "white" {
-			tag = ragtag.WhitePhrase(u32s(s.ID))
+			continue
 		}
+		tag := ragtag.Sample(u32s(s.ID))
 		seed = append(seed, caller.BatchItem{Tag: tag, Text: s.Text})
 		sampleTagOf[tag] = s.ID
 	}
@@ -254,8 +236,7 @@ func (m *Manager) syncRAGProgress(ctx context.Context, onProgress func(done, fai
 	return total, failed, nil
 }
 
-// upsertRAGPhrase 单条语录写入 RAG（学习闭环/导入用）。
-// listType 决定 tag 前缀（black → ragtag.Sample；white → ragtag.WhitePhrase）。
+// upsertRAGPhrase 单条黑名单语录写入 RAG（学习闭环/导入用）。
 // 返回 (bool, error)：bool=true 表示已真实写入向量库；RAG 未配置/不可用返回 (false, nil)。
 func (m *Manager) upsertRAGPhrase(ctx context.Context, phraseID uint, text, listType string) (bool, error) {
 	cli := m.getRAG()
@@ -263,11 +244,8 @@ func (m *Manager) upsertRAGPhrase(ctx context.Context, phraseID uint, text, list
 		return false, nil // 未配置：未写入
 	}
 	tag := ragtag.Sample(u32s(phraseID))
-	if listType == "white" {
-		tag = ragtag.WhitePhrase(u32s(phraseID))
-	}
 	if _, err := cli.Upsert(ctx, ragtag.ScoopGroupMgr, tag, text); err != nil {
-		log.Warn("语录写入 RAG 失败", "phrase", phraseID, "list", listType, "err", err)
+		log.Warn("语录写入 RAG 失败", "phrase", phraseID, "err", err)
 		return false, err
 	}
 	m.invalidateSampleSet()

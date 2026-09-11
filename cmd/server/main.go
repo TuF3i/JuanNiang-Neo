@@ -307,8 +307,6 @@ func main() {
 		log.Error("群管理初始化失败", "err", err)
 	} else {
 		go gm.Run(ctx)
-		// 白名单语录 GC：周期性清理未命中语录（在 Run 初始化成功后启动，避免并发 Init）
-		go gm.StartWhiteGC(ctx)
 	}
 	hago.GroupMgr = gm
 	// 系统命令：后注册覆盖插件同名命令（命令树覆盖语义），旧插件停用前不冲突

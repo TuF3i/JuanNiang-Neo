@@ -23,21 +23,19 @@ func (m *Manager) SyncRAGProgress(ctx context.Context, onProgress func(done, fai
 	return m.syncRAGProgress(ctx, onProgress)
 }
 
-// AddPhrase 新增违禁语录（黑/白名单）：写语录表 + RAG 双向同步（可用时）。
+// AddPhrase 新增黑名单违禁语录：写语录表 + RAG 同步（可用时）。
 // 返回语录 ID；RAG 未配置/失败不影响入库（面板可手动同步）。
+// 白名单语录体系已剔除：listType 仅为兼容旧签名保留，一律按 black 落库。
 func (m *Manager) AddPhrase(ctx context.Context, text, category, listType string) (uint, error) {
-	if listType != "white" {
-		listType = "black"
-	}
-	id, err := m.dao.SampleAddPhrase(ctx, text, category, "import", listType)
+	id, err := m.dao.SampleAddPhrase(ctx, text, category, "import", "black")
 	if err != nil {
 		return 0, err
 	}
 	// 仅真实写入 RAG 成功才标记已同步（区分「客户端存在」与「upsert 成功」）
-	synced, _ := m.upsertRAGPhrase(ctx, id, text, listType)
+	synced, _ := m.upsertRAGPhrase(ctx, id, text, "black")
 	_ = m.dao.SampleMarkRAGSynced(ctx, id, synced)
 	if !synced {
-		log.Warn("语录写入 RAG 失败（可手动同步）", "phrase", id, "list", listType)
+		log.Warn("语录写入 RAG 失败（可手动同步）", "phrase", id)
 	}
 	m.invalidateSampleSet()
 	return id, nil
@@ -61,45 +59,29 @@ func (m *Manager) DeleteWord(ctx context.Context, id uint) error {
 	return fmt.Errorf("关键词词库已改为只读内存兜底（从 txt 加载），不再支持删除")
 }
 
-// deleteRAGPhrase 删除语录向量（双删）。按集合选择 tag 前缀。
+// deleteRAGPhrase 删除语录向量（双删）。白名单语录体系已剔除，一律按黑名单 tag 删除；
+// 存量 white 向量（wt: 前缀）不在此清理（数据保留不使用）。
 // RAG 未配置/不可用时返回 nil（无向量可删，视同成功）；删除失败返回 error（调用方决定是否保留 PG 行）。
 func (m *Manager) deleteRAGPhrase(ctx context.Context, sampleID uint, listType string) error {
 	cli := m.getRAG()
 	if cli == nil {
 		return nil
 	}
-	tag := ragtag.Sample(u32s(sampleID))
-	if listType == "white" {
-		tag = ragtag.WhitePhrase(u32s(sampleID))
-	}
-	if err := cli.Delete(ctx, ragtag.ScoopGroupMgr, tag); err != nil {
-		log.Warn("语录从 RAG 删除失败", "phrase", sampleID, "list", listType, "err", err)
+	if err := cli.Delete(ctx, ragtag.ScoopGroupMgr, ragtag.Sample(u32s(sampleID))); err != nil {
+		log.Warn("语录从 RAG 删除失败", "phrase", sampleID, "err", err)
 		return err
 	}
 	m.invalidateSampleSet()
 	return nil
 }
 
-// DeleteSample 删除语录（双删 RAG 向量，按黑白集合选 tag；不可用静默跳过）。
+// DeleteSample 删除语录（双删 RAG 向量；不可用静默跳过）。
 func (m *Manager) DeleteSample(ctx context.Context, id uint) error {
-	// 先查集合类型（决定 RAG tag 前缀），再删除
-	var listType string
-	if list, err := m.dao.SampleListAll(ctx); err == nil {
-		for _, s := range list {
-			if s.ID == id {
-				listType = s.ListType
-				break
-			}
-		}
-	}
 	if err := m.dao.SampleDelete(ctx, id); err != nil {
 		return err
 	}
-	if listType == "" {
-		listType = "black"
-	}
 	// 手动删除语义：RAG 删除失败仅告警，不阻塞 PG 删除（用户主动删除，残留向量由对账清理）
-	_ = m.deleteRAGPhrase(ctx, id, listType)
+	_ = m.deleteRAGPhrase(ctx, id, "black")
 	return nil
 }
 

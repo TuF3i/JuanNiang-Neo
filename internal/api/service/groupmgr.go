@@ -65,9 +65,6 @@ func (s *Service) UpdateGroupMgrConfig(ctx context.Context, c *app.RequestContex
 	if data.BlackMinScore > 0 && data.BlackMinScore <= 1 {
 		cfg.BlackMinScore = data.BlackMinScore
 	}
-	if data.WhiteMinScore > 0 && data.WhiteMinScore <= 1 {
-		cfg.WhiteMinScore = data.WhiteMinScore
-	}
 	if data.LLMBatchWindow > 0 && data.LLMBatchWindow <= 60 {
 		cfg.LLMBatchWindow = data.LLMBatchWindow
 	}
@@ -93,10 +90,6 @@ func (s *Service) UpdateGroupMgrConfig(ctx context.Context, c *app.RequestContex
 	cfg.LLMCriteria = data.LLMCriteria
 	cfg.LLMGrayPrompt = data.LLMGrayPrompt
 	cfg.LLMHighRiskPrompt = data.LLMHighRiskPrompt
-	// GC 周期（天），非法值忽略保留原值
-	if data.WhiteGCIntervalDays > 0 {
-		cfg.WhiteGCIntervalDays = data.WhiteGCIntervalDays
-	}
 	if err := s.DAO.GroupMgr.UpdateConfig(ctx, cfg); err != nil {
 		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.ServerInternalErr, dto.ErrorDetail{ErrorDetail: err.Error()}))
 		return
@@ -180,14 +173,8 @@ func (s *Service) SyncGroupMgrRAGStream(ctx context.Context, c *app.RequestConte
 
 // ListGroupMgrSamples 语录列表（?list_type=black/white 过滤；违禁语录管理页）。
 func (s *Service) ListGroupMgrSamples(ctx context.Context, c *app.RequestContext) {
-	listType := strings.TrimSpace(c.Query("list_type"))
-	var list []models.GroupMgrSample
-	var err error
-	if listType == "white" || listType == "black" {
-		list, err = s.DAO.GroupMgr.SampleListByList(ctx, listType)
-	} else {
-		list, err = s.DAO.GroupMgr.SampleListAll(ctx)
-	}
+	// 白名单语录体系已剔除：列表只返回黑名单（存量 white 行保留不展示）
+	list, err := s.DAO.GroupMgr.SampleListByList(ctx, "black")
 	if err != nil {
 		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.ServerInternalErr, dto.ErrorDetail{ErrorDetail: err.Error()}))
 		return
@@ -201,9 +188,6 @@ func (s *Service) ListGroupMgrSamples(ctx context.Context, c *app.RequestContext
 		}
 		// 派生 RAG tag（面板 UUID 展示/对账用，与检索侧一致）
 		tag := ragtag.Sample(u32str(sp.ID))
-		if sp.ListType == "white" {
-			tag = ragtag.WhitePhrase(u32str(sp.ID))
-		}
 		resp = append(resp, dto.GroupMgrSampleResp{
 			ID: sp.ID, WordID: sp.WordID, ListType: sp.ListType, Text: sp.Text, Category: sp.Category, Source: sp.Source,
 			HitCount: sp.HitCount, RAGSynced: sp.RAGSynced, RAGTag: tag.String(),
@@ -213,7 +197,7 @@ func (s *Service) ListGroupMgrSamples(ctx context.Context, c *app.RequestContext
 	c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.OK, resp))
 }
 
-// AddGroupMgrPhrase 新增违禁语录（黑/白名单，单条添加）。
+// AddGroupMgrPhrase 新增黑名单违禁语录（单条添加；白名单语录体系已剔除）。
 func (s *Service) AddGroupMgrPhrase(ctx context.Context, c *app.RequestContext) {
 	var data dto.AddGroupMgrPhraseReq
 	if err := c.BindJSON(&data); err != nil {
@@ -221,8 +205,8 @@ func (s *Service) AddGroupMgrPhrase(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	data.Text = strings.TrimSpace(data.Text)
-	if data.Text == "" || (data.ListType != "black" && data.ListType != "white") {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.BindJSONErr, dto.ErrorDetail{ErrorDetail: "text 为空或 list_type 非法（black/white）"}))
+	if data.Text == "" || (data.ListType != "" && data.ListType != "black") {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.BindJSONErr, dto.ErrorDetail{ErrorDetail: "text 为空或 list_type 非法（仅 black）"}))
 		return
 	}
 	if len([]rune(data.Text)) > 200 {
@@ -246,8 +230,8 @@ func (s *Service) AddGroupMgrPhrase(ctx context.Context, c *app.RequestContext) 
 // 限制：单文件 ≤ 1MB、行数 ≤ 20000。
 func (s *Service) ImportGroupMgrPhrases(ctx context.Context, c *app.RequestContext) {
 	listType := strings.TrimSpace(c.Query("list_type"))
-	if listType != "black" && listType != "white" {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.BindJSONErr, dto.ErrorDetail{ErrorDetail: "list_type 非法（black/white）"}))
+	if listType != "black" {
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.BindJSONErr, dto.ErrorDetail{ErrorDetail: "list_type 非法（仅 black）"}))
 		return
 	}
 	category := strings.TrimSpace(c.Query("category"))
@@ -466,14 +450,13 @@ func (s *Service) TestGroupMgr(ctx context.Context, c *app.RequestContext) {
 func groupMgrConfigResp(cfg *models.GroupMgrConfig) dto.GroupMgrConfigResp {
 	return dto.GroupMgrConfigResp{
 		Enabled: cfg.Enabled, LLMReview: cfg.LLMReview,
-		BlackMinScore: cfg.BlackMinScore, WhiteMinScore: cfg.WhiteMinScore,
+		BlackMinScore: cfg.BlackMinScore,
 		LLMBatchWindow: cfg.LLMBatchWindow,
 		ImgSpamWindow:  cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
 		EnableCopyCheck: cfg.EnableCopyCheck, CopyThreshold: cfg.CopyThreshold,
 		ViolationMuteSeconds: cfg.ViolationMuteSeconds,
 		ExcludeGroups:        cfg.ExcludeGroups,
 		LLMPrompt:            cfg.LLMPrompt, LLMCriteria: cfg.LLMCriteria, LLMGrayPrompt: cfg.LLMGrayPrompt, LLMHighRiskPrompt: cfg.LLMHighRiskPrompt,
-		WhiteGCIntervalDays: cfg.WhiteGCIntervalDays,
 	}
 }
 

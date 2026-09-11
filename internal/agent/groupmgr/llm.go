@@ -59,8 +59,11 @@ type reviewItem struct {
 // reviewResult 批量判定结果中单条消息的裁决。
 type reviewResult struct {
 	Index   int    `json:"index"`   // 对应送审块序号
-	Verdict string `json:"verdict"` // black（黑名单）/ white（白名单）/ none（放行）
-	Reason  string `json:"reason"`
+	Verdict string `json:"verdict"` // black（违规处罚）/ none（放行）
+	// Category 违规类型（verdict=black 时输出）：ad（广告引流）/ sensitive（敏感违禁）。
+	// 非法/缺失值在裁决应用时兜底 ad；none 时忽略。
+	Category string `json:"category"`
+	Reason   string `json:"reason"`
 }
 
 // reviewBatch LLM 批量判定输出。
@@ -240,8 +243,8 @@ func (m *Manager) batchUserPrompt(items []reviewItem) string {
 		sb.WriteString("\n（提示：部分消息 RAG 语义相似度见各自的 rag_score 字段，仅作参考）")
 	}
 	sb.WriteString("\n\n你是群聊内容审查员。请严格按以下 JSON 格式逐条输出（每条消息一个结果，index 必须与上方 <USER_TEXT> 的 index 对应）：\n")
-	sb.WriteString("{\"results\":[{\"index\":0,\"verdict\":\"black|white|none\",\"reason\":\"一句话说明理由\"}]}\n")
-	sb.WriteString("verdict 取值：black=违规处罚 / white=正常交流放行 / none=无法明确归属。只输出 JSON，不要输出任何其它文字。")
+	sb.WriteString("{\"results\":[{\"index\":0,\"verdict\":\"black|none\",\"category\":\"ad|sensitive\",\"reason\":\"一句话说明理由\"}]}\n")
+	sb.WriteString("verdict 取值：black=违规处罚 / none=放行；verdict=black 时必须给出 category（ad=广告引流 / sensitive=敏感违禁），verdict=none 时 category 输出 \"none\"。只输出 JSON，不要输出任何其它文字。")
 	return sb.String()
 }
 
@@ -275,6 +278,10 @@ func (m *Manager) handleReviewBatch(ctx context.Context, out reviewOutcome) {
 				continue
 			}
 			seen[r.Index] = true
+			// 旧提示词/模型漂移可能残留 white 输出：按 none 放行（白名单体系已剔除）
+			if r.Verdict == "white" {
+				r.Verdict = "none"
+			}
 			verdicts[r.Index] = r
 		}
 	}
@@ -287,26 +294,26 @@ func (m *Manager) handleReviewBatch(ctx context.Context, out reviewOutcome) {
 // applyVerdict 批内单条裁决应用：处罚 / 放行 / 学习闭环（异步，不阻塞）。
 func (m *Manager) applyVerdict(ctx context.Context, it reviewItem, res reviewResult, failed bool) {
 	// 审查耗时期间可能已被加入白名单/成为管理员：先复查豁免再写终态。
-	// 已豁免用户必须落放行终态（white），否则 ReviewGate 会因 black 丢弃 Agent 回复。
+	// 已豁免用户必须落放行终态（none），否则 ReviewGate 会因 black 丢弃 Agent 回复。
 	exempted := m.isWhitelisted(ctx, it.userID) || m.isGroupAdmin(it.userID, it.admins, it.groupID)
 
 	m.llmMu.Lock()
 	delete(m.llmPending, it.pk)
 	// 审核终态落库（发送前闸门 ReviewGate 查询；TTL 随 llmReviewed 清理）：
-	// black=已判违规（Agent 回复应被丢弃）；white/none=放行；
+	// black=已判违规（Agent 回复应被丢弃）；none=放行；
 	// 失败且无硬信号=不记录（按未送审放行）；失败且硬信号直罚=记 black。
 	switch {
 	case exempted:
 		// 已豁免：写放行终态，不落 black（处罚下方同样跳过）
-		m.reviewVerdict[it.messageID] = "white"
-	case failed || (res.Verdict != "black" && res.Verdict != "white" && res.Verdict != "none"):
+		m.reviewVerdict[it.messageID] = "none"
+	case failed || (res.Verdict != "black" && res.Verdict != "none"):
 		if it.rc.highRisk && it.rc.hard {
 			m.reviewVerdict[it.messageID] = "black"
 		}
 	case res.Verdict == "black":
 		m.reviewVerdict[it.messageID] = "black"
 	default:
-		m.reviewVerdict[it.messageID] = res.Verdict // white / none
+		m.reviewVerdict[it.messageID] = res.Verdict // none
 	}
 	m.llmMu.Unlock()
 
@@ -332,7 +339,7 @@ func (m *Manager) applyVerdict(ctx context.Context, it reviewItem, res reviewRes
 	rc := it.rc
 
 	// LLM 请求失败 / 该条裁决缺失或非法 → fail-closed：硬信号直罚，否则放行
-	if failed || (res.Verdict != "black" && res.Verdict != "white" && res.Verdict != "none") {
+	if failed || (res.Verdict != "black" && res.Verdict != "none") {
 		if rc.highRisk && rc.hard {
 			// 高危回退直罚（敏感/黑词/卡片）
 			metrics.GroupMgrLLMReviewsTotal.WithLabelValues("error").Inc()
@@ -354,32 +361,35 @@ func (m *Manager) applyVerdict(ctx context.Context, it reviewItem, res reviewRes
 	switch res.Verdict {
 	case "black":
 		metrics.GroupMgrLLMReviewsTotal.WithLabelValues("black").Inc()
-		// 处罚分类优先级：RAG 命中样本类别（语义，最可靠）> 关键词类别 > 卡片（卡片归 ad）
-		category := "ad"
-		if rc.ragCategory == "sensitive" || rc.wordCat == "sensitive" {
-			category = "sensitive"
-		}
+		// 处罚/学习入库类型优先级：LLM 判定类型（最直接）> RAG 命中样本类别 > 关键词类别 > ad
+		category := violationCategory(res.Category, rc)
 		reason := res.Reason
 		if reason == "" {
 			reason = reasonByWord(rc.word, rc.wordCat, rc.card)
 		}
 		// 检索追踪日志：方式=LLM + 判定结果 + 消息前 20 字
-		log.Info("违禁检测: 方式=LLM", "verdict", "black", "msg", headText(it.rawText, 20), "reason", reason, "user", it.userID)
+		log.Info("违禁检测: 方式=LLM", "verdict", "black", "category", category, "msg", headText(it.rawText, 20), "reason", reason, "user", it.userID)
 		m.punish(ctx, ev, reason, category, "llm")
-		// 学习闭环：异步写入黑名单语录（不阻塞）
+		// 学习闭环：异步写入对应类型的黑名单语录（不阻塞）
 		m.learnPhraseAsync(ctx, it.rawText, "black", category, ev)
-	case "white":
-		metrics.GroupMgrLLMReviewsTotal.WithLabelValues("white").Inc()
-		// 检索追踪日志：方式=LLM + 判定结果 + 消息前 20 字
-		log.Info("违禁检测: 方式=LLM", "verdict", "white", "msg", headText(it.rawText, 20), "reason", res.Reason, "user", it.userID)
-		// 学习闭环：异步写入白名单语录
-		m.learnPhraseAsync(ctx, it.rawText, "white", "ok", ev)
-		log.Info("LLM 判定白名单，放行", "user", it.userID, "reason", res.Reason)
 	default: // none
 		metrics.GroupMgrLLMReviewsTotal.WithLabelValues("none").Inc()
 		log.Info("违禁检测: 方式=LLM", "verdict", "none", "msg", headText(it.rawText, 20), "reason", res.Reason, "user", it.userID)
 		log.Info("LLM 判定放行", "user", it.userID, "reason", res.Reason)
 	}
+}
+
+// violationCategory LLM 判黑的处罚/学习类型：
+// LLM 输出 category（ad/sensitive）优先，未输出或非法时回退 RAG 命中样本类别、关键词类别，兜底 ad。
+func violationCategory(llmCategory string, rc reviewCtx) string {
+	switch llmCategory {
+	case "ad", "sensitive":
+		return llmCategory
+	}
+	if rc.ragCategory == "sensitive" || rc.wordCat == "sensitive" {
+		return "sensitive"
+	}
+	return "ad"
 }
 
 // learnPhraseAsync 学习闭环：LLM 判黑/白的消息异步写入对应语录（Postgres + RAG）。
