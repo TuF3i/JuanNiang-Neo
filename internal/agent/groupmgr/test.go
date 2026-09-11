@@ -29,10 +29,15 @@ func (m *Manager) TestViolation(ctx context.Context, text string) *TestReport {
 
 	card := detectGroupCard(text)
 	rep.Card = card
-	rep.Word, rep.WordCat = m.wordHit(ctx, stripCQ(text))
+	// 卡片文本化：card-only 输入剥离 CQ 后为空，与 detectViolation 主链路保持一致
+	query := strings.TrimSpace(stripCQ(text))
+	if query == "" && card {
+		query = cardText(text)
+	}
+	rep.Word, rep.WordCat = m.wordHit(ctx, query)
 
 	// observe=false：链路测试不观测生产指标（RAGSearchLatency/GroupMgrRAGScore/RAGSearchErrorsTotal）
-	if v := m.verifyByRAG(ctx, stripCQ(text), false); v.ok {
+	if v := m.verifyByRAG(ctx, query, false); v.ok {
 		rep.RAGOK = true
 		if v.black != nil {
 			rep.BlackScore = v.black.score

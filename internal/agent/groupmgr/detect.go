@@ -2,6 +2,7 @@ package groupmgr
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"JuanNiang-Neo/internal/adapter"
@@ -50,6 +51,108 @@ func detectGroupCard(raw string) bool {
 	}
 }
 
+// unescapeCQEntity 还原 CQ 码转义实体（&#44; , / &#91; [ / &#93; ] / &amp; &）。
+// &amp; 必须最后还原，避免把用户原文里的 "&amp;#44;" 字面量二次解码。
+func unescapeCQEntity(s string) string {
+	if !strings.Contains(s, "&") {
+		return s
+	}
+	s = strings.ReplaceAll(s, "&#44;", ",")
+	s = strings.ReplaceAll(s, "&#91;", "[")
+	s = strings.ReplaceAll(s, "&#93;", "]")
+	return strings.ReplaceAll(s, "&amp;", "&")
+}
+
+// cardText 推荐卡片文本化：从 raw 中的 CQ:json 卡片段提取送审文本。
+// card-only 消息剥离 CQ 码后为空，若不补文本，RAG 会因空 q 报错降级、
+// LLM 送审拿到空 <USER_TEXT> 无法判定（issue #76）。提取 prompt 与 meta 内
+// 昵称/描述等文本字段（跳过 URL），JSON 解析失败时退回清洗后的 data 原文，
+// 保证对 detectGroupCard 命中的卡片返回非空；无可识别卡片返回空串。
+func cardText(raw string) string {
+	lower := strings.ToLower(raw)
+	pos := 0
+	for {
+		s := strings.Index(lower[pos:], "[cq:json")
+		if s < 0 {
+			return ""
+		}
+		s += pos
+		e := strings.Index(lower[s:], "]")
+		if e < 0 {
+			e = len(lower) - s
+		}
+		seg, segLower := raw[s:s+e], lower[s:s+e]
+		pos = s + e
+		isCard := false
+		for _, app := range qqCardApps {
+			if strings.Contains(segLower, app) {
+				isCard = true
+				break
+			}
+		}
+		if !isCard {
+			continue
+		}
+		if t := cardJSONText(seg); t != "" {
+			return t
+		}
+	}
+}
+
+// cardJSONText 从单个 CQ:json 段提取卡片文本（data= 后的 payload）。
+func cardJSONText(seg string) string {
+	i := strings.Index(seg, "data=")
+	if i < 0 {
+		return "[推荐卡片]"
+	}
+	payload := unescapeCQEntity(seg[i+len("data="):])
+	fallback := headText(strings.Join(strings.Fields(payload), " "), 400)
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(payload), &obj); err != nil || obj == nil {
+		if fallback == "" {
+			return "[推荐卡片]"
+		}
+		return "[推荐卡片] " + fallback
+	}
+	var parts []string
+	addPart := func(s string) {
+		s = strings.TrimSpace(s)
+		// 跳过 URL（jumpUrl/avatar 等对 RAG/LLM 判定是噪声）
+		if s == "" || strings.Contains(s, "://") {
+			return
+		}
+		for _, p := range parts {
+			if p == s {
+				return
+			}
+		}
+		parts = append(parts, s)
+	}
+	if v, ok := obj["prompt"].(string); ok {
+		addPart(v)
+	}
+	if meta, ok := obj["meta"].(map[string]any); ok {
+		for _, mv := range meta {
+			cm, ok := mv.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, k := range []string{"nickname", "contact", "desc"} {
+				if v, ok := cm[k].(string); ok {
+					addPart(v)
+				}
+			}
+		}
+	}
+	if len(parts) == 0 {
+		if fallback == "" {
+			return "[推荐卡片]"
+		}
+		return "[推荐卡片] " + fallback
+	}
+	return headText("[推荐卡片] "+strings.Join(parts, " "), 600)
+}
+
 // detectMessage 群消息检测入口（Phase 0.5）。
 // 顺序：违禁言论（不消费）→ 图片刷屏（消费）→ +1 复读（消费）。
 func (m *Manager) detectMessage(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig) bool {
@@ -76,10 +179,15 @@ func (m *Manager) detectViolation(ctx context.Context, ev adapter.Event, cfg *mo
 	msg := ev.Message
 	raw := msg.RawMessage
 	text := strings.TrimSpace(stripCQ(raw))
-	if text == "" && !detectGroupCard(raw) {
+	card := detectGroupCard(raw)
+	// 卡片文本化：card-only 消息剥离 CQ 后为空，提取卡片字段作送审文本，
+	// 否则 RAG 空 q 报错降级、LLM 送审空 <USER_TEXT> 无法判定（issue #76）
+	if text == "" && card {
+		text = cardText(raw)
+	}
+	if text == "" {
 		return false
 	}
-	card := detectGroupCard(raw)
 	// 关键词命中仅作最后兜底（RAG+LLM 均不可用时），不参与 RAG 判据
 	word, wordCat := m.wordHit(ctx, text)
 
@@ -95,24 +203,25 @@ func (m *Manager) detectViolation(ctx context.Context, ev adapter.Event, cfg *mo
 
 	// 第一核实人：RAG 语义匹配（黑白语录双集合）
 	if v := m.verifyByRAG(ctx, text, true); v.ok {
-		return m.handleRAGMatch(ctx, ev, cfg, card, word, wordCat, v)
+		return m.handleRAGMatch(ctx, ev, cfg, text, card, word, wordCat, v)
 	}
 	// RAG 不可用 → 转入 LLM 判定路径（handleRAGMatch 的 RAG 未命中分支同此路径）
-	return m.handleRAGUnavailablePath(ctx, ev, cfg, card, word, wordCat)
+	return m.handleRAGUnavailablePath(ctx, ev, cfg, text, card, word, wordCat)
 }
 
 // handleRAGUnavailablePath RAG 不可用时的判定路径：先 LLM，LLM 也不可用才走关键词兜底。
 // 与 handleRAGMatch 中 RAG 未达阈值的分支共享语义：均送 LLM 判定，LLM 不可用才降级关键词。
 func (m *Manager) handleRAGUnavailablePath(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig,
-	card bool, word, wordCat string) bool {
-	// 无 RAG 命中信息：rc 仅含关键词预查与卡片硬信号
-	rc := reviewCtx{word: word, wordCat: wordCat, card: card}
+	text string, card bool, word, wordCat string) bool {
+	// 无 RAG 命中信息：rc 仅含送审文本 + 关键词预查结果；卡片为硬信号
+	// （LLM 异常时按 keyword 路径同语义直罚，不让推荐卡片因 LLM 故障漏网）
+	rc := reviewCtx{text: text, word: word, wordCat: wordCat, card: card, highRisk: card, hard: card}
 	if m.submitReview(ctx, ev, rc) {
 		metrics.GroupMgrDetectionsTotal.WithLabelValues("rag", "review").Inc()
 		return true
 	}
 	// LLM 也不可用 → 关键词兜底（RAG + LLM 均失败）
-	return m.handleKeywordPath(ctx, ev, cfg, card, word, wordCat)
+	return m.handleKeywordPath(ctx, ev, cfg, text, card, word, wordCat)
 }
 
 // handleRAGMatch RAG 语义匹配后的分档决策：
@@ -121,7 +230,7 @@ func (m *Manager) handleRAGUnavailablePath(ctx context.Context, ev adapter.Event
 //	白名单命中 score ≥ WhiteMinScore  → 放行
 //	均未达阈值                         → LLM 统一判定（批窗口）；LLM 不可用 → 关键词兜底
 func (m *Manager) handleRAGMatch(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig,
-	card bool, word, wordCat string, v ragVerdict) bool {
+	text string, card bool, word, wordCat string, v ragVerdict) bool {
 	// 黑名单优先（fail-closed）：黑白同时命中且都过阈值时按黑处罚
 	if v.black != nil && v.black.score >= cfg.BlackMinScore {
 		category := "ad"
@@ -162,7 +271,7 @@ func (m *Manager) handleRAGMatch(ctx context.Context, ev adapter.Event, cfg *mod
 		}
 		log.Info("违禁检测: 方式=RAG未达阈值", "list", list, "score", score, "hit", headText(hit, 20), "user", ev.Message.UserID)
 	}
-	rc := reviewCtx{word: word, wordCat: wordCat, card: card}
+	rc := reviewCtx{text: text, word: word, wordCat: wordCat, card: card, highRisk: card, hard: card}
 	if v.black != nil {
 		rc.ragScore = &v.black.score
 		rc.ragPhrase = v.black.text
@@ -178,12 +287,12 @@ func (m *Manager) handleRAGMatch(ctx context.Context, ev adapter.Event, cfg *mod
 	}
 	// LLM 不可用 → 关键词兜底
 	metrics.GroupMgrDetectionsTotal.WithLabelValues("rag", "pass").Inc()
-	return m.handleKeywordPath(ctx, ev, cfg, card, word, wordCat)
+	return m.handleKeywordPath(ctx, ev, cfg, text, card, word, wordCat)
 }
 
 // handleKeywordPath 关键词兜底路径（仅 RAG 或 LLM 不可用时使用，= 旧插件行为）。
 func (m *Manager) handleKeywordPath(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig,
-	card bool, word, wordCat string) bool {
+	text string, card bool, word, wordCat string) bool {
 	switch {
 	case wordCat == "sensitive" || wordCat == "black" || card:
 		// 检索追踪日志：方式=关键词兜底（高危词命中）
@@ -194,7 +303,7 @@ func (m *Manager) handleKeywordPath(ctx context.Context, ev adapter.Event, cfg *
 			kind = "card"
 		}
 		if m.submitReview(ctx, ev, reviewCtx{
-			word: word, wordCat: wordCat, kind: kind, highRisk: true, hard: true, card: card,
+			text: text, word: word, wordCat: wordCat, kind: kind, highRisk: true, hard: true, card: card,
 		}) {
 			metrics.GroupMgrDetectionsTotal.WithLabelValues("keyword", "review").Inc()
 			return true
@@ -207,7 +316,7 @@ func (m *Manager) handleKeywordPath(ctx context.Context, ev adapter.Event, cfg *
 		log.Info("违禁检测: 方式=关键词", "kind", "gray", "word", headText(word, 20), "cat", wordCat, "card", card, "user", ev.Message.UserID)
 		// 常规审查；LLM 不可用 → 放行（异步追罚语义）
 		if m.submitReview(ctx, ev, reviewCtx{
-			word: word, wordCat: "gray", kind: "gray", highRisk: false, hard: false, card: card,
+			text: text, word: word, wordCat: "gray", kind: "gray", highRisk: false, hard: false, card: card,
 		}) {
 			metrics.GroupMgrDetectionsTotal.WithLabelValues("keyword", "review").Inc()
 		} else {

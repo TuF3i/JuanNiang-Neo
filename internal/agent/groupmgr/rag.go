@@ -3,6 +3,7 @@ package groupmgr
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"JuanNiang-Neo/internal/core/ragtag"
@@ -117,6 +118,10 @@ func (m *Manager) verifyByRAG(ctx context.Context, query string, observe bool) (
 	cli := m.getRAG()
 	if cli == nil {
 		return v // RAG 未配置 → 不可用
+	}
+	// 空 query 不送检索：RAG API 对空 q 直接 400（必然失败），按不可用降级
+	if strings.TrimSpace(query) == "" {
+		return v
 	}
 	owned := m.buildPhraseSet(ctx)
 	if owned == nil {
