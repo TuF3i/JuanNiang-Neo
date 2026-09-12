@@ -15,8 +15,6 @@ type TestReport struct {
 	RAGOK       bool    `json:"rag_ok"`       // RAG 路径是否可用
 	BlackScore  float64 `json:"black_score"`  // 黑名单语录最高分
 	BlackPhrase string  `json:"black_phrase"` // 黑名单最相似语录
-	WhiteScore  float64 `json:"white_score"`  // 白名单语录最高分
-	WhitePhrase string  `json:"white_phrase"` // 白名单最相似语录
 	Verdict     string  `json:"verdict"`      // 最终判定：punish / review / pass
 	Reason      string  `json:"reason"`       // 判定说明
 }
@@ -43,25 +41,15 @@ func (m *Manager) TestViolation(ctx context.Context, text string) *TestReport {
 			rep.BlackScore = v.black.score
 			rep.BlackPhrase = v.black.text
 		}
-		if v.white != nil {
-			rep.WhiteScore = v.white.score
-			rep.WhitePhrase = v.white.text
-		}
 		// 黑名单命中（≥ BlackMinScore）→ 处罚
 		if v.black != nil && v.black.score >= cfg.BlackMinScore {
 			rep.Verdict = "punish"
 			rep.Reason = "RAG 黑名单命中（分数 " + fscore(v.black.score) + " ≥ " + fscore(cfg.BlackMinScore) + "）→ 直接处罚"
 			return rep
 		}
-		// 白名单命中（≥ WhiteMinScore）→ 放行
-		if v.white != nil && v.white.score >= cfg.WhiteMinScore {
-			rep.Verdict = "pass"
-			rep.Reason = "RAG 白名单命中（分数 " + fscore(v.white.score) + " ≥ " + fscore(cfg.WhiteMinScore) + "）→ 放行"
-			return rep
-		}
-		// 均未达到阈值 → LLM 统一判定（批窗口）
+		// 未命中 / 未达阈值 → LLM 统一判定（批窗口）
 		rep.Verdict = "review"
-		rep.Reason = "未命中黑白名单 → LLM 统一判定（3s 批窗口，逐条独立）"
+		rep.Reason = "未命中黑名单 → LLM 统一判定（3s 批窗口，逐条独立）"
 		return rep
 	}
 

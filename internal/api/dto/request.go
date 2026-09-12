@@ -369,7 +369,6 @@ type UpdateGroupMgrConfigReq struct {
 	Enabled              bool     `json:"enabled"`
 	LLMReview            bool     `json:"llm_review"`
 	BlackMinScore        float64  `json:"black_min_score"`
-	WhiteMinScore        float64  `json:"white_min_score"`
 	LLMBatchWindow       int      `json:"llm_batch_window"`
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
@@ -382,16 +381,13 @@ type UpdateGroupMgrConfigReq struct {
 	LLMCriteria          string   `json:"llm_criteria"`
 	LLMGrayPrompt        string   `json:"llm_gray_prompt"`
 	LLMHighRiskPrompt    string   `json:"llm_high_risk_prompt"`
-
-	// WhiteGCIntervalDays 白名单语录 GC 周期（天），默认 7
-	WhiteGCIntervalDays int `json:"white_gc_interval_days"`
 }
 
-// AddGroupMgrPhraseReq 新增违禁语录（黑/白名单）。
+// AddGroupMgrPhraseReq 新增黑名单违禁语录（白名单语录体系已剔除）。
 type AddGroupMgrPhraseReq struct {
 	Text     string `json:"text"`
-	Category string `json:"category"`  // black 语录：ad / sensitive；white 语录忽略
-	ListType string `json:"list_type"` // black / white
+	Category string `json:"category"`  // ad / sensitive
+	ListType string `json:"list_type"` // 仅 black（兼容旧前端传参）
 }
 
 // AddGroupMgrWordReq 新增词条（已废弃：关键词仅作兜底不可修改，保留兼容）。

@@ -35,18 +35,6 @@ func (m *Manager) phraseHit(ctx context.Context, tag uuid.UUID) {
 	_ = m.dao.SampleTouch(ctx, info.id)
 }
 
-// phraseTouch 白名单语录命中（放行时更新命中次数与最近命中时间，GC 判定未使用记录用）。
-func (m *Manager) phraseTouch(ctx context.Context, tag uuid.UUID) {
-	m.sampleMu.Lock()
-	info, ok := m.sampleSet.white[tag]
-	m.sampleMu.Unlock()
-	if !ok || info.id == 0 {
-		return
-	}
-	_ = m.dao.SampleIncrHit(ctx, info.id)
-	_ = m.dao.SampleTouch(ctx, info.id)
-}
-
 // Stats 统计摘要（/groupstats 命令与 Web 面板共用）。
 type Stats struct {
 	GroupID   int64  `json:"group_id"`

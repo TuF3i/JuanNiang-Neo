@@ -486,7 +486,6 @@ export interface GroupMgrConfigResp {
   enabled: boolean
   llm_review: boolean
   black_min_score: number
-  white_min_score: number
   llm_batch_window: number
   img_spam_window: number
   img_spam_threshold: number
@@ -499,14 +498,12 @@ export interface GroupMgrConfigResp {
   llm_criteria: string
   llm_gray_prompt: string
   llm_high_risk_prompt: string
-  white_gc_interval_days: number
 }
 
 export interface UpdateGroupMgrConfigReq {
   enabled: boolean
   llm_review: boolean
   black_min_score: number
-  white_min_score: number
   llm_batch_window: number
   img_spam_window: number
   img_spam_threshold: number
@@ -519,7 +516,6 @@ export interface UpdateGroupMgrConfigReq {
   llm_criteria: string
   llm_gray_prompt: string
   llm_high_risk_prompt: string
-  white_gc_interval_days: number
 }
 export interface GroupMgrWordResp { id: number; word: string; category: string; source: string; rag_synced: boolean; rag_tag: string }
 export interface GroupMgrSampleResp {
@@ -555,8 +551,6 @@ export interface GroupMgrTestResp {
   rag_ok: boolean
   black_score: number | null
   black_phrase: string
-  white_score: number | null
-  white_phrase: string
   verdict: string
   reason: string
 }
@@ -577,12 +571,12 @@ export const groupMgrApi = {
   syncRAG: () => client.post('/group-mgr/sync-rag'),
   samples: (listType?: string) => client.get('/group-mgr/samples', { params: { list_type: listType } }),
   deleteSample: (id: number) => client.delete(`/group-mgr/samples/${id}`),
-  addPhrase: (text: string, listType: string, category?: string) =>
-    client.post('/group-mgr/phrases', { text, list_type: listType, category }),
-  importPhrases: (file: File, listType: string, category?: string) => {
+  addPhrase: (text: string, category?: string) =>
+    client.post('/group-mgr/phrases', { text, list_type: 'black', category }),
+  importPhrases: (file: File, category?: string) => {
     const form = new FormData()
     form.append('file', file)
-    return client.post(`/group-mgr/phrases/import?list_type=${listType}&category=${category ?? 'ad'}`, form, {
+    return client.post(`/group-mgr/phrases/import?list_type=black&category=${category ?? 'ad'}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

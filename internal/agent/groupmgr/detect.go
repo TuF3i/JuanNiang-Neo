@@ -166,13 +166,11 @@ func (m *Manager) detectMessage(ctx context.Context, ev adapter.Event, cfg *mode
 	return false
 }
 
-// detectViolation 违禁言论检测：RAG 语义匹配（第一核实人）→ LLM 统一判定 → 关键词兜底。
+// detectViolation 违禁言论检测：RAG 语义匹配黑名单（第一核实人）→ LLM 统一判定 → 关键词兜底。
 // 流程：
-//  1. RAG 检索黑/白语录双集合：
-//     黑名单命中（score ≥ BlackMinScore）→ 处罚；白名单命中（score ≥ WhiteMinScore）→ 放行；
-//  2. 均未命中 → LLM 批量判定（3s 窗口凑批，逐条独立黑白判定）；
-//  3. RAG 不可用 → LLM 批量判定（同 2）；
-//  4. RAG 与 LLM 均不可用 → 关键词兜底（敏感/黑词直罚、灰词放行）。
+//  1. RAG 检索黑名单语录：命中（score ≥ BlackMinScore）→ 按样本类型处罚；
+//  2. 未命中 / 未达阈值 / RAG 不可用 → LLM 批量判定（3s 窗口凑批，逐条独立判定）；
+//  3. LLM 也不可用 → 关键词兜底（敏感/黑词直罚、灰词放行）。
 //
 // 返回 true 仅表示"已发起同步处罚"，不影响消费语义（违禁类一律不消费消息）。
 func (m *Manager) detectViolation(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig) bool {
@@ -201,16 +199,15 @@ func (m *Manager) detectViolation(ctx context.Context, ev adapter.Event, cfg *mo
 	)
 	defer span.End()
 
-	// 第一核实人：RAG 语义匹配（黑白语录双集合）
+	// 第一核实人：RAG 语义匹配黑名单
 	if v := m.verifyByRAG(ctx, text, true); v.ok {
 		return m.handleRAGMatch(ctx, ev, cfg, text, card, word, wordCat, v)
 	}
-	// RAG 不可用 → 转入 LLM 判定路径（handleRAGMatch 的 RAG 未命中分支同此路径）
+	// RAG 不可用 → 转入 LLM 判定路径
 	return m.handleRAGUnavailablePath(ctx, ev, cfg, text, card, word, wordCat)
 }
 
 // handleRAGUnavailablePath RAG 不可用时的判定路径：先 LLM，LLM 也不可用才走关键词兜底。
-// 与 handleRAGMatch 中 RAG 未达阈值的分支共享语义：均送 LLM 判定，LLM 不可用才降级关键词。
 func (m *Manager) handleRAGUnavailablePath(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig,
 	text string, card bool, word, wordCat string) bool {
 	// 无 RAG 命中信息：rc 仅含送审文本 + 关键词预查结果；卡片为硬信号
@@ -226,12 +223,10 @@ func (m *Manager) handleRAGUnavailablePath(ctx context.Context, ev adapter.Event
 
 // handleRAGMatch RAG 语义匹配后的分档决策：
 //
-//	黑名单命中 score ≥ BlackMinScore  → 直接处罚（白名单即使更高分也以黑优先，fail-closed）
-//	白名单命中 score ≥ WhiteMinScore  → 放行
-//	均未达阈值                         → LLM 统一判定（批窗口）；LLM 不可用 → 关键词兜底
+//	黑名单命中 score ≥ BlackMinScore → 按样本类型直接处罚
+//	未命中 / 未达阈值                → LLM 统一判定（批窗口）；LLM 不可用 → 关键词兜底
 func (m *Manager) handleRAGMatch(ctx context.Context, ev adapter.Event, cfg *models.GroupMgrConfig,
 	text string, card bool, word, wordCat string, v ragVerdict) bool {
-	// 黑名单优先（fail-closed）：黑白同时命中且都过阈值时按黑处罚
 	if v.black != nil && v.black.score >= cfg.BlackMinScore {
 		category := "ad"
 		if v.black.category == "sensitive" {
@@ -239,47 +234,25 @@ func (m *Manager) handleRAGMatch(ctx context.Context, ev adapter.Event, cfg *mod
 		}
 		reason := "RAG黑名单语义匹配"
 		metrics.GroupMgrDetectionsTotal.WithLabelValues("rag", "punish").Inc()
-		// 检索追踪日志：方式=RAG + 命中集合/分数 + 命中语录前 20 字
+		// 检索追踪日志：方式=RAG + 命中分数 + 命中语录前 20 字
 		log.Info("违禁检测: 方式=RAG", "list", "black", "score", v.black.score, "hit", headText(v.black.text, 20), "user", ev.Message.UserID)
 		m.punish(ctx, ev, reason, category, "rag")
 		m.phraseHit(ctx, v.black.tag)
 		log.Info("RAG 黑名单命中，处罚", "score", v.black.score, "phrase", v.black.text, "user", ev.Message.UserID)
 		return true
 	}
-	// 白名单：命中即放行（须达阈值，防低分噪声误放行）
-	if v.white != nil && v.white.score >= cfg.WhiteMinScore {
-		// 检索追踪日志：方式=RAG + 命中集合/分数 + 命中语录前 20 字
-		log.Info("违禁检测: 方式=RAG", "list", "white", "score", v.white.score, "hit", headText(v.white.text, 20), "user", ev.Message.UserID)
-		m.phraseTouch(ctx, v.white.tag)
-		metrics.GroupMgrDetectionsTotal.WithLabelValues("rag", "pass").Inc()
-		log.Info("RAG 白名单命中，放行", "score", v.white.score, "phrase", v.white.text, "user", ev.Message.UserID)
-		return false
-	}
 
-	// 均未达阈值 → LLM 统一判定（批窗口异步，不阻塞主循环）
-	// 检索追踪日志：方式=RAG 但未命中黑白语录（含知识/记忆向量干扰时的低分命中）→ 送 LLM
-	if v.black == nil && v.white == nil {
+	// 未命中 / 未达阈值 → LLM 统一判定（批窗口异步，不阻塞主循环）
+	if v.black == nil {
 		log.Info("违禁检测: 方式=RAG未命中", "list", "none", "score", 0.0, "hit", "", "user", ev.Message.UserID)
 	} else {
-		var score float64
-		var hit string
-		var list string
-		if v.black != nil {
-			score, hit, list = v.black.score, v.black.text, "black"
-		} else if v.white != nil {
-			score, hit, list = v.white.score, v.white.text, "white"
-		}
-		log.Info("违禁检测: 方式=RAG未达阈值", "list", list, "score", score, "hit", headText(hit, 20), "user", ev.Message.UserID)
+		log.Info("违禁检测: 方式=RAG未达阈值", "list", "black", "score", v.black.score, "hit", headText(v.black.text, 20), "user", ev.Message.UserID)
 	}
 	rc := reviewCtx{text: text, word: word, wordCat: wordCat, card: card, highRisk: card, hard: card}
 	if v.black != nil {
 		rc.ragScore = &v.black.score
 		rc.ragPhrase = v.black.text
 		rc.ragCategory = v.black.category
-	} else if v.white != nil {
-		rc.ragScore = &v.white.score
-		rc.ragPhrase = v.white.text
-		rc.ragCategory = v.white.category
 	}
 	if m.submitReview(ctx, ev, rc) {
 		metrics.GroupMgrDetectionsTotal.WithLabelValues("rag", "review").Inc()
