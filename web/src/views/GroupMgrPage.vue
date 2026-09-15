@@ -338,7 +338,8 @@
             <template #append>
               <div class="d-flex align-center ga-2">
                 <v-btn icon="mdi-refresh" size="small" variant="text" @click="loadJoinReviewAll" />
-                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-robot-outline" @click="openJoinReviewConfig">AI 审核设置</v-btn>
+                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-cog-outline" @click="openJoinReviewConfig">审核设置</v-btn>
+                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-robot-outline" @click="openPromptConfig">AI 提示词</v-btn>
               </div>
             </template>
           </v-card-item>
@@ -483,24 +484,45 @@
                 <v-text-field v-model.number="joinCfgDraft.batch_size" label="批量阈值（条）" type="number" min="1" density="compact" hide-details />
                 <v-text-field v-model.number="joinCfgDraft.flush_seconds" label="触发窗口（秒）" type="number" min="1" density="compact" hide-details />
               </div>
-              <div v-if="joinCfgDraft.enabled_groups.length" class="mt-4">
-                <div class="text-subtitle-2 mb-2">各群 AI 审核提示词（留空使用内置默认）</div>
-                <div v-for="g in joinCfgDraft.enabled_groups" :key="g" class="mb-3">
-                  <div class="text-caption text-medium-emphasis mb-1">{{ groupTitle(g) }}</div>
-                  <v-textarea
-                    v-model="joinCfgDraft.prompts[String(g)]"
-                    rows="2"
-                    auto-grow
-                    density="compact"
-                    hide-details
-                    placeholder="描述本群的定位与审核口径，例如：这是 XX 招新群，拒绝广告/推广类申请…"
-                  />
-                </div>
-              </div>
             </v-card-text>
             <v-card-actions class="pa-4 pt-0">
               <v-btn color="primary" variant="tonal" :loading="savingJoinCfg" @click="saveJoinReviewConfig">保存</v-btn>
               <v-btn variant="text" @click="joinCfgDialog = false">取消</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- AI 提示词设置对话框：下拉选群，提示词随选中群自动切换 -->
+        <v-dialog v-model="promptCfgDialog" max-width="640">
+          <v-card>
+            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-robot-outline</v-icon>AI 提示词设置</v-card-title>
+            <v-card-text>
+              <template v-if="joinCfgDraft.enabled_groups.length">
+                <v-select
+                  v-model="promptGroupID"
+                  :items="promptGroupOptions"
+                  label="选择群聊"
+                  density="compact"
+                  hide-details
+                />
+                <div class="text-caption text-medium-emphasis mt-3 mb-1">{{ groupTitle(promptGroupID ?? 0) }} 的审核提示词（留空使用内置默认）</div>
+                <v-textarea
+                  :key="promptGroupID ?? 'none'"
+                  v-model="joinCfgDraft.prompts[String(promptGroupID)]"
+                  rows="4"
+                  auto-grow
+                  density="compact"
+                  hide-details
+                  placeholder="描述本群的定位与审核口径，例如：这是 XX 招新群，拒绝广告/推广类申请…"
+                />
+              </template>
+              <v-alert v-else type="info" variant="tonal">
+                尚未配置生效群：请先在「审核设置」中勾选需要 AI 审核的群，再回来设置各群提示词。
+              </v-alert>
+            </v-card-text>
+            <v-card-actions class="pa-4 pt-0">
+              <v-btn color="primary" variant="tonal" :loading="savingJoinCfg" :disabled="!joinCfgDraft.enabled_groups.length" @click="savePromptConfig">保存</v-btn>
+              <v-btn variant="text" @click="promptCfgDialog = false">取消</v-btn>
             </v-card-actions>
           </v-card>
         </v-dialog>
@@ -1059,6 +1081,12 @@ const decidingId = ref<number | null>(null)
 const savingJoinCfg = ref(false)
 const joinCfgDialog = ref(false)
 const joinCfgDraft = ref<JoinReviewConfig>({ enabled_groups: [], prompts: {}, batch_size: 5, flush_seconds: 60 })
+const promptCfgDialog = ref(false)
+const promptGroupID = ref<number | null>(null)
+// 提示词仅对生效群有意义：下拉选项跟随审核设置里的生效群
+const promptGroupOptions = computed(() =>
+  joinCfgDraft.value.enabled_groups.map((g) => ({ title: groupTitle(g), value: g })),
+)
 const rejectDialog = ref(false)
 const rejectTarget = ref<JoinReviewRequestItem | null>(null)
 const rejectReason = ref('')
@@ -1190,6 +1218,21 @@ async function loadJoinReviewConfig() {
 }
 
 async function saveJoinReviewConfig() {
+  if (await persistJoinReviewConfig()) joinCfgDialog.value = false
+}
+
+async function openPromptConfig() {
+  promptCfgDialog.value = true
+  await loadJoinReviewConfig()
+  // 默认选中第一个生效群，下方提示词随下拉切换自动刷新
+  promptGroupID.value = joinCfgDraft.value.enabled_groups[0] ?? null
+}
+
+async function savePromptConfig() {
+  if (await persistJoinReviewConfig()) promptCfgDialog.value = false
+}
+
+async function persistJoinReviewConfig(): Promise<boolean> {
   savingJoinCfg.value = true
   try {
     const d = joinCfgDraft.value
@@ -1200,9 +1243,10 @@ async function saveJoinReviewConfig() {
       flush_seconds: Number(d.flush_seconds) || 60,
     })
     toastStore.success('加群审核配置已保存')
-    joinCfgDialog.value = false
+    return true
   } catch (e: any) {
     toastStore.error(e?.message || '保存失败')
+    return false
   } finally {
     savingJoinCfg.value = false
   }
