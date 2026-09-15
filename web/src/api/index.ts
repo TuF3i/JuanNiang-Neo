@@ -532,6 +532,32 @@ export interface GroupMgrSampleResp {
   created_at: string
 }
 export interface GroupMgrViolationResp { id: number; group_id: number; user_id: number; username: string; count: number; detection_path: string; llm_reason: string }
+export interface JoinReviewRequestItem {
+  id: number
+  group_id: number
+  user_id: number
+  username: string
+  comment: string
+  created_at: string
+}
+export interface JoinReviewRecordItem {
+  id: number
+  group_id: number
+  user_id: number
+  username: string
+  comment: string
+  verdict: 'approve' | 'reject'
+  reviewer: 'ai' | 'manual'
+  reason: string
+  reviewed_at: string
+}
+export interface JoinReviewRecordListResp { total: number; list: JoinReviewRecordItem[] }
+export interface JoinReviewConfig {
+  enabled_groups: number[]
+  prompts: Record<string, string>
+  batch_size: number
+  flush_seconds: number
+}
 export interface GroupMgrStatsResp {
   group_id: number
   date: string
@@ -589,4 +615,12 @@ export const groupMgrApi = {
   syncAdminsFromAdapter: () => client.post('/group-mgr/admins/sync-from-adapter'),
   stats: (group_id: number) => client.get('/group-mgr/stats', { params: { group_id } }),
   test: (text: string) => client.post('/group-mgr/test', { text }),
+  // ----- 加群审核（AI 攒批审核） -----
+  joinReviewRequests: () => client.get('/group-mgr/join-review/requests'),
+  reviewJoinRequest: (id: number, approve: boolean, reason?: string) =>
+    client.post(`/group-mgr/join-review/requests/${id}/decision`, { approve, reason: reason ?? '' }),
+  joinReviewRecords: (page = 1, pageSize = 15) =>
+    client.get('/group-mgr/join-review/records', { params: { page, page_size: pageSize } }),
+  joinReviewConfig: () => client.get('/group-mgr/join-review/config'),
+  updateJoinReviewConfig: (data: JoinReviewConfig) => client.put('/group-mgr/join-review/config', data),
 }

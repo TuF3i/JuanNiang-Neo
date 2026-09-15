@@ -110,6 +110,38 @@ let groupMgrViolations = [
 let groupMgrWhitelist: number[] = [30001]
 let groupMgrAdmins: number[] = [30002]
 
+// --- 加群审核（AI 攒批审核） ---
+// 群号对齐 chatAreas mock 里的群聊 target_id（555666777 / 888999000），保证设置弹窗群选择器可选
+const joinReviewAgo = (sec: number) => new Date(Date.now() - sec * 1000).toISOString()
+let joinReviewRequestSeed = 100
+let joinReviewRequests = [
+  { id: 1, group_id: 555666777, user_id: 21001, username: '小张', comment: '群里同学推荐来的', created_at: joinReviewAgo(35) },
+  { id: 2, group_id: 555666777, user_id: 21002, username: '广告哥', comment: '办校园卡加微信XXX，低价流量卡', created_at: joinReviewAgo(70) },
+  { id: 3, group_id: 888999000, user_id: 21003, username: '新生小李', comment: '', created_at: joinReviewAgo(130) },
+  { id: 4, group_id: 555666777, user_id: 21004, username: '考研人', comment: '想了解考研交流群', created_at: joinReviewAgo(300) },
+  { id: 5, group_id: 888999000, user_id: 21005, username: '路人甲', comment: '随便看看', created_at: joinReviewAgo(600) },
+]
+let joinReviewRecordSeed = 100
+let joinReviewRecords = [
+  { id: 1, group_id: 555666777, user_id: 21011, username: '小陈', comment: '学长拉我进来的', verdict: 'approve', reviewer: 'ai', reason: '留言正常，无风险信号，建议通过', reviewed_at: joinReviewAgo(1800) },
+  { id: 2, group_id: 555666777, user_id: 21012, username: '兼职代理', comment: '招兼职代理日结300', verdict: 'reject', reviewer: 'ai', reason: '留言含「招兼职代理」推广话术，命中广告特征，建议拒绝', reviewed_at: joinReviewAgo(1810) },
+  { id: 3, group_id: 888999000, user_id: 21013, username: '老王', comment: '朋友推荐', verdict: 'approve', reviewer: 'manual', reason: '管理员手动通过', reviewed_at: joinReviewAgo(3600) },
+  { id: 4, group_id: 555666777, user_id: 21014, username: '神秘人', comment: '', verdict: 'reject', reviewer: 'manual', reason: '昵称含违规词汇，手动拒绝', reviewed_at: joinReviewAgo(7200) },
+  { id: 5, group_id: 555666777, user_id: 21015, username: '阿强', comment: '想学前端', verdict: 'approve', reviewer: 'ai', reason: '诉求为技术交流，无风险', reviewed_at: joinReviewAgo(9000) },
+  { id: 6, group_id: 888999000, user_id: 21016, username: '贷款哥', comment: '大学生小额贷款秒批', verdict: 'reject', reviewer: 'ai', reason: '留言为贷款推广，命中敏感类目，建议拒绝', reviewed_at: joinReviewAgo(14400) },
+  { id: 7, group_id: 888999000, user_id: 21017, username: '小刘', comment: '重邮新生', verdict: 'approve', reviewer: 'ai', reason: '自我介绍正常，无风险信号', reviewed_at: joinReviewAgo(28800) },
+  { id: 8, group_id: 555666777, user_id: 21018, username: '跑腿小哥', comment: '校园跑腿接单', verdict: 'approve', reviewer: 'manual', reason: '', reviewed_at: joinReviewAgo(43200) },
+]
+let joinReviewConfig = {
+  enabled_groups: [555666777, 888999000],
+  prompts: {
+    555666777: '这是红岩网校工作站招新群，主要面向重邮对前端/后端/运维感兴趣的新生。',
+    888999000: '',
+  } as Record<string, string>,
+  batch_size: 5,
+  flush_seconds: 60,
+}
+
 // --- 知识库 ---
 let knowledgeItems = [
   { id: UUID(), title: '红岩网校介绍', content: '红岩网校是重庆邮电大学的互联网团队，负责学校的网络信息化建设。', keywords: ['红岩网校', '重邮'], keyword_status: 'ready', created_at: now(), updated_at: now() },
@@ -957,6 +989,59 @@ export const mockHandlers: MockHandler[] = [
         verdict,
         reason,
       })
+    }
+  },
+
+  // ============ 加群审核（AI 攒批审核） ============
+  {
+    method: 'GET', path: '/group-mgr/join-review/requests',
+    handler() { return ok(joinReviewRequests) }
+  },
+  {
+    method: 'POST', path: '/group-mgr/join-review/requests/:id/decision',
+    handler({ body, params }) {
+      const id = Number(params.id)
+      const idx = joinReviewRequests.findIndex((r) => r.id === id)
+      if (idx < 0) return err(40400, '请求不存在或已被处理')
+      const req = joinReviewRequests[idx]
+      joinReviewRequests.splice(idx, 1)
+      joinReviewRecords.unshift({
+        id: ++joinReviewRecordSeed,
+        group_id: req.group_id,
+        user_id: req.user_id,
+        username: req.username,
+        comment: req.comment,
+        verdict: body?.approve ? 'approve' : 'reject',
+        reviewer: 'manual',
+        reason: String(body?.reason || (body?.approve ? '管理员手动通过' : '管理员手动拒绝')),
+        reviewed_at: now(),
+      })
+      return ok(null)
+    }
+  },
+  {
+    method: 'GET', path: '/group-mgr/join-review/records',
+    handler({ query }) {
+      const page = Math.max(1, Number(query.page) || 1)
+      const pageSize = Math.min(100, Math.max(1, Number(query.page_size) || 15))
+      const start = (page - 1) * pageSize
+      return ok({ total: joinReviewRecords.length, list: joinReviewRecords.slice(start, start + pageSize) })
+    }
+  },
+  {
+    method: 'GET', path: '/group-mgr/join-review/config',
+    handler() { return ok(joinReviewConfig) }
+  },
+  {
+    method: 'PUT', path: '/group-mgr/join-review/config',
+    handler({ body }) {
+      joinReviewConfig = {
+        enabled_groups: (body?.enabled_groups || []).map(Number),
+        prompts: body?.prompts || {},
+        batch_size: Number(body?.batch_size) || 5,
+        flush_seconds: Number(body?.flush_seconds) || 60,
+      }
+      return ok(joinReviewConfig)
     }
   },
 
