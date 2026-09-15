@@ -17,6 +17,7 @@
         <v-tab value="prompts"><v-icon class="me-1">mdi-text-box-edit-outline</v-icon>提示词设置</v-tab>
         <v-tab value="phrases"><v-icon class="me-1">mdi-format-list-bulleted-type</v-icon>违禁语录列表</v-tab>
         <v-tab value="violations"><v-icon class="me-1">mdi-clipboard-alert-outline</v-icon>违规记录</v-tab>
+        <v-tab value="join-review"><v-icon class="me-1">mdi-account-multiple-check-outline</v-icon>加群审核</v-tab>
       </v-tabs>
       <v-btn color="primary" variant="tonal" prepend-icon="mdi-flask-outline" @click="openTestDialog">链路测试</v-btn>
     </div>
@@ -329,6 +330,204 @@
         </v-dialog>
       </v-window-item>
 
+      <!-- ================= 加群审核 ================= -->
+      <v-window-item value="join-review">
+        <v-card rounded="lg" elevation="1">
+          <v-card-item>
+            <template #title><span class="text-h6 font-weight-bold">加群审核</span></template>
+            <template #append>
+              <div class="d-flex align-center ga-2">
+                <v-btn icon="mdi-refresh" size="small" variant="text" @click="loadJoinReviewAll" />
+                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-cog-outline" @click="openJoinReviewConfig">审核设置</v-btn>
+                <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-robot-outline" @click="openPromptConfig">AI 提示词</v-btn>
+              </div>
+            </template>
+          </v-card-item>
+          <v-divider />
+          <div class="px-4 pt-2">
+            <v-tabs v-model="joinSubTab" density="compact">
+              <v-tab value="requests">当前请求</v-tab>
+              <v-tab value="records">审核记录</v-tab>
+            </v-tabs>
+          </div>
+          <v-divider />
+          <v-window v-model="joinSubTab">
+            <!-- 当前请求 -->
+            <v-window-item value="requests">
+              <v-card-text>
+                <v-data-table :headers="joinRequestHeaders" :items="joinRequests" :loading="joinRequestsLoading" density="compact" :items-per-page="15" class="elevation-0">
+                  <template #item.comment="{ item }">
+                    <span class="text-body-2">{{ item.comment || '（无留言）' }}</span>
+                  </template>
+                  <template #item.created_at="{ item }">
+                    <span class="text-caption text-medium-emphasis">{{ fmtTime(item.created_at) }}</span>
+                  </template>
+                  <template #item.actions="{ item }">
+                    <div class="d-flex ga-1">
+                      <v-btn size="x-small" color="success" variant="tonal" prepend-icon="mdi-check" :loading="decidingId === item.id" @click="approveJoinRequest(item)">通过</v-btn>
+                      <v-btn size="x-small" color="error" variant="tonal" prepend-icon="mdi-close" @click="openRejectDialog(item)">拒绝</v-btn>
+                    </div>
+                  </template>
+                  <template #no-data>
+                    <div class="text-caption text-medium-emphasis pa-4 text-center">暂无待审核的加群请求</div>
+                  </template>
+                </v-data-table>
+              </v-card-text>
+            </v-window-item>
+            <!-- 审核记录 -->
+            <v-window-item value="records">
+              <v-card-text>
+                <v-data-table
+                  :headers="joinRecordHeaders"
+                  :items="joinRecords"
+                  :loading="joinRecordsLoading"
+                  :items-length="recordTotal"
+                  :items-per-page="recordPageSize"
+                  density="compact"
+                  class="elevation-0"
+                  @update:options="onRecordOptions"
+                >
+                  <template #item.comment="{ item }">
+                    <span class="text-body-2">{{ item.comment || '（无留言）' }}</span>
+                  </template>
+                  <template #item.verdict="{ item }">
+                    <v-chip size="x-small" :color="verdictChip(item.verdict).color">{{ verdictChip(item.verdict).label }}</v-chip>
+                  </template>
+                  <template #item.reviewer="{ item }">
+                    <v-chip size="x-small" :color="reviewerChip(item.reviewer).color">{{ reviewerChip(item.reviewer).label }}</v-chip>
+                  </template>
+                  <template #item.reason="{ item }">
+                    <v-btn
+                      v-if="item.reason"
+                      size="x-small"
+                      variant="tonal"
+                      color="primary"
+                      prepend-icon="mdi-message-text-outline"
+                      @click="joinRecordReason = item"
+                    >查看理由</v-btn>
+                    <span v-else class="text-caption text-medium-emphasis">-</span>
+                  </template>
+                  <template #item.reviewed_at="{ item }">
+                    <span class="text-caption text-medium-emphasis">{{ fmtTime(item.reviewed_at) }}</span>
+                  </template>
+                  <template #no-data>
+                    <div class="text-caption text-medium-emphasis pa-4 text-center">暂无审核记录</div>
+                  </template>
+                </v-data-table>
+              </v-card-text>
+            </v-window-item>
+          </v-window>
+        </v-card>
+
+        <!-- 拒绝加群请求对话框 -->
+        <v-dialog v-model="rejectDialog" max-width="480">
+          <v-card>
+            <v-card-title class="py-3"><v-icon class="me-2" color="error">mdi-account-remove-outline</v-icon>拒绝加群请求</v-card-title>
+            <v-card-text>
+              <div class="text-body-2 text-medium-emphasis mb-3">
+                群 {{ rejectTarget?.group_id }} · QQ {{ rejectTarget?.user_id }} · {{ rejectTarget?.username || '未知用户' }}
+              </div>
+              <v-textarea
+                v-model="rejectReason"
+                label="拒绝理由（可选，随拒绝动作发送给申请者）"
+                rows="2"
+                auto-grow
+                density="compact"
+                hide-details
+              />
+            </v-card-text>
+            <v-card-actions class="pa-4 pt-0">
+              <v-btn color="error" variant="tonal" :loading="decidingId === rejectTarget?.id" @click="confirmReject">拒绝</v-btn>
+              <v-btn variant="text" @click="rejectDialog = false">取消</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- 审核理由对话框 -->
+        <v-dialog v-model="joinRecordReasonOpen" max-width="560">
+          <v-card>
+            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-message-text-outline</v-icon>审核理由</v-card-title>
+            <v-card-text>
+              <div class="text-body-2 text-medium-emphasis mb-2">
+                群 {{ joinRecordReason?.group_id }} · QQ {{ joinRecordReason?.user_id }} · {{ joinRecordReason?.username || '未知用户' }}
+                <v-chip class="ms-2" size="x-small" :color="reviewerChip(joinRecordReason?.reviewer || '').color">{{ reviewerChip(joinRecordReason?.reviewer || '').label }}</v-chip>
+              </div>
+              <v-sheet class="pa-3 rounded" variant="tonal" style="background: rgba(var(--v-theme-on-surface), 0.05)">
+                <div class="text-body-2" style="white-space: pre-wrap">{{ joinRecordReason?.reason || '（无）' }}</div>
+              </v-sheet>
+            </v-card-text>
+            <v-card-actions class="pa-4 pt-0">
+              <v-btn variant="text" @click="joinRecordReason = null">关闭</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- AI 审核设置对话框 -->
+        <v-dialog v-model="joinCfgDialog" max-width="640">
+          <v-card>
+            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-robot-outline</v-icon>加群 AI 审核设置</v-card-title>
+            <v-card-text>
+              <div class="text-caption text-medium-emphasis mb-3">
+                生效群的新加群请求会先进入缓冲区，攒满批量阈值或距首条满触发窗口后，一批送 LLM 审核；未生效群的请求不受影响，仅可人工审核。
+              </div>
+              <v-select
+                v-model="joinCfgDraft.enabled_groups"
+                :items="groupOptions"
+                label="审核生效的群"
+                multiple
+                chips
+                closable-chips
+                density="compact"
+                hide-details
+              />
+              <div class="d-flex ga-3 mt-3">
+                <v-text-field v-model.number="joinCfgDraft.batch_size" label="批量阈值（条）" type="number" min="1" density="compact" hide-details />
+                <v-text-field v-model.number="joinCfgDraft.flush_seconds" label="触发窗口（秒）" type="number" min="1" density="compact" hide-details />
+              </div>
+            </v-card-text>
+            <v-card-actions class="pa-4 pt-0">
+              <v-btn color="primary" variant="tonal" :loading="savingJoinCfg" @click="saveJoinReviewConfig">保存</v-btn>
+              <v-btn variant="text" @click="joinCfgDialog = false">取消</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- AI 提示词设置对话框：下拉选群，提示词随选中群自动切换 -->
+        <v-dialog v-model="promptCfgDialog" max-width="640">
+          <v-card>
+            <v-card-title class="py-3"><v-icon class="me-2" color="primary">mdi-robot-outline</v-icon>AI 提示词设置</v-card-title>
+            <v-card-text>
+              <template v-if="joinCfgDraft.enabled_groups.length">
+                <v-select
+                  v-model="promptGroupID"
+                  :items="promptGroupOptions"
+                  label="选择群聊"
+                  density="compact"
+                  hide-details
+                />
+                <div class="text-caption text-medium-emphasis mt-3 mb-1">{{ groupTitle(promptGroupID ?? 0) }} 的审核提示词（留空使用内置默认）</div>
+                <v-textarea
+                  :key="promptGroupID ?? 'none'"
+                  v-model="joinCfgDraft.prompts[String(promptGroupID)]"
+                  rows="4"
+                  auto-grow
+                  density="compact"
+                  hide-details
+                  placeholder="描述本群的定位与审核口径，例如：这是 XX 招新群，拒绝广告/推广类申请…"
+                />
+              </template>
+              <v-alert v-else type="info" variant="tonal">
+                尚未配置生效群：请先在「审核设置」中勾选需要 AI 审核的群，再回来设置各群提示词。
+              </v-alert>
+            </v-card-text>
+            <v-card-actions class="pa-4 pt-0">
+              <v-btn color="primary" variant="tonal" :loading="savingJoinCfg" :disabled="!joinCfgDraft.enabled_groups.length" @click="savePromptConfig">保存</v-btn>
+              <v-btn variant="text" @click="promptCfgDialog = false">取消</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+      </v-window-item>
+
       <!-- ================= 链路测试对话框（Tab 栏最右按钮） ================= -->
       <v-dialog v-model="testDialog" max-width="640">
         <v-card>
@@ -414,8 +613,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { groupMgrApi, pluginApi, chatAreaApi, adapterApi, ragApi, type GroupMgrConfigResp, type GroupMgrSampleResp, type GroupMgrViolationResp, type GroupMgrStatsResp, type GroupMgrTestResp, type ChatAreaResp } from '@/api'
+import { ref, computed, watch, onMounted } from 'vue'
+import { groupMgrApi, pluginApi, chatAreaApi, adapterApi, ragApi, type GroupMgrConfigResp, type GroupMgrSampleResp, type GroupMgrViolationResp, type GroupMgrStatsResp, type GroupMgrTestResp, type ChatAreaResp, type JoinReviewRequestItem, type JoinReviewRecordItem, type JoinReviewConfig } from '@/api'
 import { useToastStore } from '@/stores/toast'
 
 const toastStore = useToastStore()
@@ -866,6 +1065,190 @@ async function saveWhitelist() {
     toastStore.error(e?.message || '保存失败')
   } finally {
     savingList.value = false
+  }
+}
+
+// ---------- 加群审核（AI 攒批审核） ----------
+const joinSubTab = ref<'requests' | 'records'>('requests')
+const joinRequests = ref<JoinReviewRequestItem[]>([])
+const joinRequestsLoading = ref(false)
+const joinRecords = ref<JoinReviewRecordItem[]>([])
+const joinRecordsLoading = ref(false)
+const recordPage = ref(1)
+const recordPageSize = ref(15)
+const recordTotal = ref(0)
+const decidingId = ref<number | null>(null)
+const savingJoinCfg = ref(false)
+const joinCfgDialog = ref(false)
+const joinCfgDraft = ref<JoinReviewConfig>({ enabled_groups: [], prompts: {}, batch_size: 5, flush_seconds: 60 })
+const promptCfgDialog = ref(false)
+const promptGroupID = ref<number | null>(null)
+// 提示词仅对生效群有意义：下拉选项跟随审核设置里的生效群
+const promptGroupOptions = computed(() =>
+  joinCfgDraft.value.enabled_groups.map((g) => ({ title: groupTitle(g), value: g })),
+)
+const rejectDialog = ref(false)
+const rejectTarget = ref<JoinReviewRequestItem | null>(null)
+const rejectReason = ref('')
+const joinRecordReason = ref<JoinReviewRecordItem | null>(null)
+// v-model 需要合法成员表达式，用 computed 包装对话框显隐（关闭时置 null）
+const joinRecordReasonOpen = computed({
+  get: () => joinRecordReason.value !== null,
+  set: (v: boolean) => { if (!v) joinRecordReason.value = null },
+})
+
+const joinRequestHeaders = [
+  { title: '群号', key: 'group_id' },
+  { title: 'QQ号', key: 'user_id' },
+  { title: '用户名', key: 'username' },
+  { title: '申请留言', key: 'comment', sortable: false },
+  { title: '申请时间', key: 'created_at' },
+  { title: '操作', key: 'actions', sortable: false },
+]
+const joinRecordHeaders = [
+  { title: '群号', key: 'group_id' },
+  { title: 'QQ号', key: 'user_id' },
+  { title: '用户名', key: 'username' },
+  { title: '申请留言', key: 'comment', sortable: false },
+  { title: '结论', key: 'verdict' },
+  { title: '审核来源', key: 'reviewer' },
+  { title: '理由', key: 'reason', sortable: false },
+  { title: '审核时间', key: 'reviewed_at' },
+]
+
+// 首次切到本 Tab 才加载数据：后端未实现时避免打开群管理页就弹错误提示
+const joinReviewEntered = ref(false)
+watch(tab, (t) => {
+  if (t === 'join-review' && !joinReviewEntered.value) {
+    joinReviewEntered.value = true
+    loadJoinRequests()
+  }
+})
+
+function fmtTime(t?: string) { return t ? new Date(t).toLocaleString() : '-' }
+function groupTitle(gid: number) { return groupOptions.value.find(o => o.value === gid)?.title ?? `群 ${gid}` }
+function verdictChip(v: string) { return v === 'approve' ? { label: '通过', color: 'success' } : { label: '拒绝', color: 'error' } }
+function reviewerChip(r: string) { return r === 'ai' ? { label: 'AI', color: 'primary' } : { label: '手动', color: 'info' } }
+
+async function loadJoinRequests() {
+  joinRequestsLoading.value = true
+  try {
+    const res = (await groupMgrApi.joinReviewRequests()).data.data
+    joinRequests.value = res || []
+  } catch (e: any) {
+    toastStore.error(e?.message || '加载加群请求失败')
+  } finally {
+    joinRequestsLoading.value = false
+  }
+}
+
+// 审核记录走服务端分页（page/page_size + total），v-data-table 挂载与翻页时触发
+function onRecordOptions(opt: { page: number; itemsPerPage: number }) {
+  recordPage.value = opt.page
+  recordPageSize.value = opt.itemsPerPage
+  loadJoinRecords()
+}
+
+async function loadJoinRecords() {
+  joinRecordsLoading.value = true
+  try {
+    const res = (await groupMgrApi.joinReviewRecords(recordPage.value, recordPageSize.value)).data.data
+    joinRecords.value = res?.list || []
+    recordTotal.value = res?.total ?? 0
+  } catch (e: any) {
+    toastStore.error(e?.message || '加载审核记录失败')
+  } finally {
+    joinRecordsLoading.value = false
+  }
+}
+
+async function decideJoinRequest(item: JoinReviewRequestItem, approve: boolean, reason: string) {
+  decidingId.value = item.id
+  try {
+    await groupMgrApi.reviewJoinRequest(item.id, approve, reason)
+    toastStore.success(`已${approve ? '通过' : '拒绝'} ${item.username || item.user_id} 的加群请求`)
+    await loadJoinRequests()
+    await loadJoinRecords()
+  } catch (e: any) {
+    toastStore.error(e?.message || '操作失败')
+  } finally {
+    decidingId.value = null
+  }
+}
+
+function approveJoinRequest(item: JoinReviewRequestItem) {
+  decideJoinRequest(item, true, '')
+}
+
+function openRejectDialog(item: JoinReviewRequestItem) {
+  rejectTarget.value = item
+  rejectReason.value = ''
+  rejectDialog.value = true
+}
+
+function confirmReject() {
+  const t = rejectTarget.value
+  if (!t) return
+  rejectDialog.value = false
+  decideJoinRequest(t, false, rejectReason.value.trim())
+}
+
+function loadJoinReviewAll() {
+  loadJoinRequests()
+  loadJoinRecords()
+}
+
+function openJoinReviewConfig() {
+  joinCfgDialog.value = true
+  loadJoinReviewConfig()
+}
+
+async function loadJoinReviewConfig() {
+  try {
+    const res = (await groupMgrApi.joinReviewConfig()).data.data
+    joinCfgDraft.value = {
+      enabled_groups: res?.enabled_groups ?? [],
+      prompts: { ...(res?.prompts ?? {}) },
+      batch_size: res?.batch_size ?? 5,
+      flush_seconds: res?.flush_seconds ?? 60,
+    }
+  } catch (e: any) {
+    toastStore.error(e?.message || '加载加群审核配置失败')
+  }
+}
+
+async function saveJoinReviewConfig() {
+  if (await persistJoinReviewConfig()) joinCfgDialog.value = false
+}
+
+async function openPromptConfig() {
+  promptCfgDialog.value = true
+  await loadJoinReviewConfig()
+  // 默认选中第一个生效群，下方提示词随下拉切换自动刷新
+  promptGroupID.value = joinCfgDraft.value.enabled_groups[0] ?? null
+}
+
+async function savePromptConfig() {
+  if (await persistJoinReviewConfig()) promptCfgDialog.value = false
+}
+
+async function persistJoinReviewConfig(): Promise<boolean> {
+  savingJoinCfg.value = true
+  try {
+    const d = joinCfgDraft.value
+    await groupMgrApi.updateJoinReviewConfig({
+      enabled_groups: d.enabled_groups.map(Number),
+      prompts: d.prompts,
+      batch_size: Number(d.batch_size) || 5,
+      flush_seconds: Number(d.flush_seconds) || 60,
+    })
+    toastStore.success('加群审核配置已保存')
+    return true
+  } catch (e: any) {
+    toastStore.error(e?.message || '保存失败')
+    return false
+  } finally {
+    savingJoinCfg.value = false
   }
 }
 
