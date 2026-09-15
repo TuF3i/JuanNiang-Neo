@@ -58,6 +58,7 @@ var (
 	T2IStyleInvalid         = Response{Status: 40049, Info: "T2I 渲染风格无效（仅允许空、random 或风格库中定义的风格名）"}
 	StickerTagSystem        = Response{Status: 40047, Info: "系统内置标签不可删除"}
 	WordImportTooLarge      = Response{Status: 40051, Info: "词库导入文件过大（≤1MB）或行数超限（≤20000）"}
+	JoinRequestNotExist     = Response{Status: 40052, Info: "加群请求不存在或已被处理"}
 )
 
 type TokenResp struct {
@@ -545,6 +546,43 @@ type GroupMgrViolationResp struct {
 	Count         int    `json:"count"`          // 当前违规等级
 	DetectionPath string `json:"detection_path"` // rag / keyword / llm
 	LLMReason     string `json:"llm_reason"`     // LLM 审核返回的 reason
+}
+
+// JoinReviewRequestResp 待审加群请求。
+type JoinReviewRequestResp struct {
+	ID        uint   `json:"id"`
+	GroupID   int64  `json:"group_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Comment   string `json:"comment"`
+	CreatedAt string `json:"created_at"`
+}
+
+// JoinReviewRecordResp 加群审核记录（AI 与人工统一）。
+type JoinReviewRecordResp struct {
+	ID         uint   `json:"id"`
+	GroupID    int64  `json:"group_id"`
+	UserID     int64  `json:"user_id"`
+	Username   string `json:"username"`
+	Comment    string `json:"comment"`
+	Verdict    string `json:"verdict"`  // approve / reject
+	Reviewer   string `json:"reviewer"` // ai / manual
+	Reason     string `json:"reason"`
+	ReviewedAt string `json:"reviewed_at"`
+}
+
+// JoinReviewRecordListResp 审核记录分页列表。
+type JoinReviewRecordListResp struct {
+	Total int64                  `json:"total"`
+	List  []JoinReviewRecordResp `json:"list"`
+}
+
+// JoinReviewConfigResp 加群审核配置。
+type JoinReviewConfigResp struct {
+	EnabledGroups []int64           `json:"enabled_groups"`
+	Prompts       map[string]string `json:"prompts"`
+	BatchSize     int               `json:"batch_size"`
+	FlushSeconds  int               `json:"flush_seconds"`
 }
 
 // GroupMgrQQListResp 白名单/管理员列表。

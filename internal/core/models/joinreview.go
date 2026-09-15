@@ -13,13 +13,13 @@ import "time"
 // 无独立 status 字段（行存在即 pending）。
 // Flag 是 OneBot 加群请求凭证，执行时必须原样回传（平台有时效，过期执行会报错）。
 type GroupJoinRequest struct {
-	ID        uint      `gorm:"primarykey"`
-	GroupID   int64     `gorm:"not null;index"`
-	UserID    int64     `gorm:"not null;index"`
-	Username  string    `gorm:"type:varchar(128)"` // 申请时昵称（请求事件不含，预留展示）
-	Comment   string    `gorm:"type:varchar(512)"` // 申请留言
-	Flag      string    `gorm:"type:varchar(256);not null"`
-	SubType   string    `gorm:"type:varchar(16);not null;default:'add'"`
+	ID        uint   `gorm:"primarykey"`
+	GroupID   int64  `gorm:"not null;index"`
+	UserID    int64  `gorm:"not null;index"`
+	Username  string `gorm:"type:varchar(128)"` // 申请时昵称（请求事件不含，预留展示）
+	Comment   string `gorm:"type:varchar(512)"` // 申请留言
+	Flag      string `gorm:"type:varchar(256);not null"`
+	SubType   string `gorm:"type:varchar(16);not null;default:'add'"`
 	CreatedAt time.Time
 }
 
