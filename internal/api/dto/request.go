@@ -383,6 +383,20 @@ type UpdateGroupMgrConfigReq struct {
 	LLMHighRiskPrompt    string   `json:"llm_high_risk_prompt"`
 }
 
+// UpdateJoinReviewConfigReq 更新加群审核配置（生效群 / 每群提示词 / 攒批阈值 / 触发窗口）。
+type UpdateJoinReviewConfigReq struct {
+	EnabledGroups []int64           `json:"enabled_groups"`
+	Prompts       map[string]string `json:"prompts"`
+	BatchSize     int               `json:"batch_size"`
+	FlushSeconds  int               `json:"flush_seconds"`
+}
+
+// JoinReviewDecisionReq 人工审核加群请求（通过/拒绝，拒绝理由随动作发送给申请者）。
+type JoinReviewDecisionReq struct {
+	Approve bool   `json:"approve"`
+	Reason  string `json:"reason"`
+}
+
 // AddGroupMgrPhraseReq 新增黑名单违禁语录（白名单语录体系已剔除）。
 type AddGroupMgrPhraseReq struct {
 	Text     string `json:"text"`
