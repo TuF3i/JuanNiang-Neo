@@ -173,6 +173,16 @@ func (h *HagoCenter) processEvent(ctx context.Context, ev adapter.Event) {
 			return
 		}
 	}
+	// Phase 0.6: 加群请求 AI 攒批审核（先于插件，Go 原生）。
+	// 命中审核生效群的申请入群请求（sub_type=add）由 JoinReview 接管并拦截，
+	// 不再派发给 Lua 插件，避免插件与 AI 审核双重处理；未生效群照旧透传插件。
+	if h.JoinReview != nil && ev.PostType == "request" && ev.Request != nil &&
+		ev.Request.RequestType == "group" && ev.Request.SubType == "add" {
+		if h.JoinReview.Interested(ctx, ev.Request.GroupID) {
+			h.JoinReview.Enqueue(ctx, ev)
+			return
+		}
+	}
 	// Phase 1: Plugin 统一拦截
 	if h.PluginEngine != nil {
 		_, pspan := otelx.Span(ctx, "plugin.dispatch")
