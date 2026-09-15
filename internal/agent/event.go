@@ -909,6 +909,12 @@ func (h *HagoCenter) handleMessage(ctx context.Context, events []adapter.Event, 
 		systemCtx += "\n\n" + kc
 	}
 
+	// OneBot11 实时上下文：拉取当前消息之前最近的 5 条聊天记录拼入系统提示词，
+	// 补齐短期记忆覆盖不到的语境（Bot 掉线/重启期间的发言、被过滤未入记忆的消息）
+	if obCtx := h.oneBotRecentContext(ctx, msg); obCtx != "" {
+		systemCtx += "\n\n" + obCtx
+	}
+
 	// ---------- 构建 Eino 消息列表 ----------
 	// 开头多条连续 system 消息合并为一条：部分 provider（硅基流动 Qwen、商汤）要求
 	// system 消息唯一且位于最前，多条 system 会报 "System message must be at the beginning"。

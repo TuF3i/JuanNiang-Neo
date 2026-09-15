@@ -73,6 +73,45 @@ func (p *Adapter) GetMsg(messageID int64) (*MessageEvent, error) {
 	return &msg, nil
 }
 
+// MsgHistoryList 消息历史响应体（get_group_msg_history / get_friend_msg_history 的 data）。
+type MsgHistoryList struct {
+	Messages []MessageEvent `json:"messages"`
+}
+
+// GetGroupMsgHistory 获取群消息历史。messageSeq>0 时返回该消息之前的历史（升序）；
+// count>0 时提示实现端返回条数（OneBot11 标准未定义 count，部分实现忽略，
+// 调用方需自行按需截断）。
+func (p *Adapter) GetGroupMsgHistory(groupID, messageSeq int64, count int) ([]MessageEvent, error) {
+	params := map[string]any{"group_id": groupID}
+	if messageSeq > 0 {
+		params["message_seq"] = messageSeq
+	}
+	if count > 0 {
+		params["count"] = count
+	}
+	rsp, err := callAndParse[MsgHistoryList](p, "get_group_msg_history", params)
+	if err != nil {
+		return nil, err
+	}
+	return rsp.Messages, nil
+}
+
+// GetFriendMsgHistory 获取好友私聊消息历史。参数语义同 GetGroupMsgHistory。
+func (p *Adapter) GetFriendMsgHistory(userID int64, count, messageSeq int64) ([]MessageEvent, error) {
+	params := map[string]any{"user_id": userID}
+	if count > 0 {
+		params["message_count"] = count
+	}
+	if messageSeq > 0 {
+		params["message_seq"] = messageSeq
+	}
+	rsp, err := callAndParse[MsgHistoryList](p, "get_friend_msg_history", params)
+	if err != nil {
+		return nil, err
+	}
+	return rsp.Messages, nil
+}
+
 // ============================================================
 // 用户相关
 // ============================================================
