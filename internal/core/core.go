@@ -61,6 +61,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.GroupMgrWhitelist{},
 		&models.GroupMgrAdmin{},
 		&models.GroupMgrStat{},
+		&models.GroupJoinRequest{},
+		&models.GroupJoinReview{},
+		&models.GroupJoinReviewConfig{},
 	)
 }
 
