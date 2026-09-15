@@ -71,6 +71,37 @@ func TestReviewGate(t *testing.T) {
 	}
 }
 
+// TestReviewGateNegativeMessageID 回归：部分 OneBot 实现（NapCat 等）的 message_id
+// 是随机 int32，可能为负值。负数 ID 是合法终态键，闸门不得当作"非法 ID"直接放行，
+// 否则 LLM 已判 black 的消息其 Agent 回复仍会被发送（线上实测踩坑）。
+func TestReviewGateNegativeMessageID(t *testing.T) {
+	m, _ := newTestManager(t, nil)
+	ctx := context.Background()
+
+	const negID = -1061542433
+
+	// 1. 负 ID 已判 black → 拦截
+	m.llmMu.Lock()
+	m.reviewVerdict[negID] = "black"
+	m.llmMu.Unlock()
+	if b, p := m.ReviewGate(ctx, 100, 200, negID); !b || p {
+		t.Fatalf("负 message_id 的 black 终态应 blocked，got blocked=%v pending=%v", b, p)
+	}
+
+	// 2. 负 ID 无终态但在途 → pending
+	m.llmMu.Lock()
+	m.llmPending[pkOf(100, 300)] = true
+	m.llmMu.Unlock()
+	if b, p := m.ReviewGate(ctx, 100, 300, negID-1); b || !p {
+		t.Fatalf("负 message_id 在途应 pending，got blocked=%v pending=%v", b, p)
+	}
+
+	// 3. 真正缺失的 0（cronjob/webhook 合成事件）仍直接放行
+	if b, p := m.ReviewGate(ctx, 100, 200, 0); b || p {
+		t.Fatalf("messageID=0 应直接放行，got blocked=%v pending=%v", b, p)
+	}
+}
+
 // TestApplyVerdictExemptedWritesNone 回归：审查窗口内用户被加入白名单（豁免）时，
 // 终态必须写放行（不写 black），否则 ReviewGate 会以 black 丢弃豁免用户的 Agent 回复。
 func TestApplyVerdictExemptedWritesNone(t *testing.T) {

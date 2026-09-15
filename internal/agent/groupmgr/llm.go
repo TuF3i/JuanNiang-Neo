@@ -104,9 +104,9 @@ func (m *Manager) submitReview(ctx context.Context, ev adapter.Event, rc reviewC
 		m.llmMu.Unlock()
 		return false
 	}
-	// 同消息 10min 去重
+	// 同消息 10min 去重（OneBot 实现的 message_id 可能为负值，只排除真正缺失的 0）
 	now := time.Now().Unix()
-	if msg.MessageID > 0 {
+	if msg.MessageID != 0 {
 		if ts, ok := m.llmReviewed[msg.MessageID]; ok && now-ts < llmDedupWindow {
 			m.llmMu.Unlock()
 			return false
@@ -501,8 +501,10 @@ const ReviewGateWait = 5 * time.Second
 // 返回 blocked：消息已被判定违规（已处罚），Agent 回复不应发送；
 // pending：审核仍在途（批窗口/LLM 判断中），调用方可用 WaitReview 等待。
 // 私聊 / 未送审 / 无记录一律放行（LLMReview 关闭、去重命中、重启丢失等）。
+// message_id 只排除缺失的 0（cronjob/webhook 等合成事件）：部分 OneBot 实现
+// 的 message_id 是随机 int32，可能为负值，负数同样是合法终态键。
 func (m *Manager) ReviewGate(ctx context.Context, groupID, userID, messageID int64) (blocked, pending bool) {
-	if messageID <= 0 || groupID <= 0 {
+	if messageID == 0 || groupID <= 0 {
 		return false, false
 	}
 	m.llmMu.Lock()
