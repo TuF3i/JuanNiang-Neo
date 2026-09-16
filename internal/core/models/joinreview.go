@@ -9,8 +9,9 @@ import "time"
 // 调 set_group_add_request 执行 → 删请求行 + 落 GroupJoinReview 终态记录。
 // 执行失败（flag 过期等）保留请求行，面板仍可见可重试。
 
-// GroupJoinRequest 待审加群请求。审核完成即删行并写入 GroupJoinReview，
-// 无独立 status 字段（行存在即 pending）。
+// GroupJoinRequest 待审加群请求。审核完成即删行并写入 GroupJoinReview。
+// Status：pending（待审，行创建时默认）/ processing（已被 AI 或人工抢占，裁决执行中）——
+// 用于人工与 AI 攒批的原子抢占（ClaimRequest CAS），避免同一请求被重复审核执行。
 // Flag 是 OneBot 加群请求凭证，执行时必须原样回传（平台有时效，过期执行会报错）。
 type GroupJoinRequest struct {
 	ID        uint   `gorm:"primarykey"`
@@ -20,6 +21,7 @@ type GroupJoinRequest struct {
 	Comment   string `gorm:"type:varchar(512)"` // 申请留言
 	Flag      string `gorm:"type:varchar(256);not null"`
 	SubType   string `gorm:"type:varchar(16);not null;default:'add'"`
+	Status    string `gorm:"type:varchar(16);not null;default:'pending';index"`
 	CreatedAt time.Time
 }
 

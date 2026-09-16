@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
+	"JuanNiang-Neo/internal/agent/joinreview"
 	"JuanNiang-Neo/internal/api/dto"
 	"JuanNiang-Neo/internal/core/models"
 
@@ -135,7 +137,11 @@ func (s *Service) DecideJoinReviewRequest(ctx context.Context, c *app.RequestCon
 		return
 	}
 	if err := s.JoinReview.ManualDecide(ctx, id, data.Approve, data.Reason); err != nil {
-		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.JoinRequestNotExist, dto.ErrorDetail{ErrorDetail: err.Error()}))
+		if errors.Is(err, joinreview.ErrRequestBusy) {
+			c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.JoinRequestNotExist, dto.ErrorDetail{ErrorDetail: err.Error()}))
+			return
+		}
+		c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.ServerInternalErr, dto.ErrorDetail{ErrorDetail: err.Error()}))
 		return
 	}
 	c.JSON(consts.StatusOK, dto.GenFinalResponse(dto.OK, nil))
