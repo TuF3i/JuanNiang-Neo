@@ -214,6 +214,7 @@ let joinReviewRecords = [
   { id: 6, group_id: 888999000, user_id: 21016, username: '贷款哥', comment: '大学生小额贷款秒批', verdict: 'reject', reviewer: 'ai', reason: '留言为贷款推广，命中敏感类目，建议拒绝', reviewed_at: joinReviewAgo(14400) },
   { id: 7, group_id: 888999000, user_id: 21017, username: '小刘', comment: '重邮新生', verdict: 'approve', reviewer: 'ai', reason: '自我介绍正常，无风险信号', reviewed_at: joinReviewAgo(28800) },
   { id: 8, group_id: 555666777, user_id: 21018, username: '跑腿小哥', comment: '校园跑腿接单', verdict: 'approve', reviewer: 'manual', reason: '', reviewed_at: joinReviewAgo(43200) },
+  { id: 9, group_id: 888999000, user_id: 21019, username: '神秘新同学', comment: '听说这里很热闹', verdict: 'manual', reviewer: 'ai', reason: '留言语义模糊，建议人工确认入群意图', reviewed_at: joinReviewAgo(600) },
 ]
 let joinReviewConfig = {
   enabled_groups: [555666777, 888999000],

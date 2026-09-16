@@ -549,7 +549,7 @@ export interface JoinReviewRecordItem {
   user_id: number
   username: string
   comment: string
-  verdict: 'approve' | 'reject'
+  verdict: 'approve' | 'reject' | 'manual'
   reviewer: 'ai' | 'manual'
   reason: string
   reviewed_at: string

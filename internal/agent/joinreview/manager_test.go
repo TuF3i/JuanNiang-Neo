@@ -335,7 +335,7 @@ func TestPromptAssembly(t *testing.T) {
 	if !strings.Contains(p, "<JR_T0KN index=0>") || !strings.Contains(p, "<JR_T0KN index=2>") {
 		t.Error("prompt missing tokenized index blocks")
 	}
-	if !strings.Contains(p, `"verdict":"approve|reject"`) {
+	if !strings.Contains(p, `"verdict":"approve|reject|manual"`) {
 		t.Error("prompt missing JSON contract")
 	}
 	if strings.Contains(p, strings.Repeat("长", llmMaxComment+1)) {

@@ -1130,7 +1130,11 @@ watch(tab, (t) => {
 
 function fmtTime(t?: string) { return t ? new Date(t).toLocaleString() : '-' }
 function groupTitle(gid: number) { return groupOptions.value.find(o => o.value === gid)?.title ?? `群 ${gid}` }
-function verdictChip(v: string) { return v === 'approve' ? { label: '通过', color: 'success' } : { label: '拒绝', color: 'error' } }
+function verdictChip(v: string) {
+  if (v === 'approve') return { label: '通过', color: 'success' }
+  if (v === 'reject') return { label: '拒绝', color: 'error' }
+  return { label: '转人工', color: 'warning' }
+}
 function reviewerChip(r: string) { return r === 'ai' ? { label: 'AI', color: 'primary' } : { label: '手动', color: 'info' } }
 
 async function loadJoinRequests() {
