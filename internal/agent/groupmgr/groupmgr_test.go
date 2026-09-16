@@ -83,18 +83,35 @@ func newTestManagerEx(t *testing.T, ragScore *float64) (*Manager, *dao.GroupMgrD
 }
 
 func TestViolationRAGUnavailableKeywordPath(t *testing.T) {
-	m, _ := newTestManager(t, nil) // 无 RAG
+	m, gmdao := newTestManager(t, nil) // 无 RAG
 	ctx := context.Background()
 
-	// 黑词 → 高危复核（review）
+	// LLMReview 开启：与生产 handleRAGUnavailablePath 一致，全量送 LLM 判定（不分词类）
 	rep := m.TestViolation(ctx, "校园卡办卡免沸！低价流量卡，加裙114514")
 	if rep.Verdict != "review" || rep.Word == "" {
 		t.Fatalf("黑词应走 review，got verdict=%s word=%q", rep.Verdict, rep.Word)
 	}
-	// 无词 → 放行
+	rep = m.TestViolation(ctx, "今天食堂的饭真好吃")
+	if rep.Verdict != "review" {
+		t.Fatalf("LLMReview 开启时无词也应 review，got %s", rep.Verdict)
+	}
+
+	// LLMReview 关闭 → 关键词兜底直判：黑词直罚，无词放行
+	cfg, _ := gmdao.GetConfig(ctx)
+	cfg.LLMReview = false
+	if err := gmdao.UpdateConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rep = m.TestViolation(ctx, "校园卡办卡免沸！低价流量卡，加裙114514")
+	if rep.Verdict != "punish" {
+		t.Fatalf("LLMReview 关闭黑词应直罚，got %s", rep.Verdict)
+	}
 	rep = m.TestViolation(ctx, "今天食堂的饭真好吃")
 	if rep.Verdict != "pass" {
-		t.Fatalf("无词应 pass，got %s", rep.Verdict)
+		t.Fatalf("LLMReview 关闭无词应 pass，got %s", rep.Verdict)
 	}
 }
 
