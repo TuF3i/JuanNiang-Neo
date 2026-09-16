@@ -33,6 +33,7 @@ func RegisterRoutes(h *server.Hertz, svc *service.Service) {
 	api.DELETE("/providers/:id", auth, svc.DeleteProvider)
 	api.PUT("/providers/:id/toggle", auth, svc.ToggleProvider)
 	api.POST("/providers/test", auth, svc.TestProvider)
+	api.POST("/providers/models", auth, svc.ListProviderModels)
 
 	// MCP
 	api.GET("/mcp", auth, svc.ListMCPServers)

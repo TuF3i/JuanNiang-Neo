@@ -12,6 +12,8 @@ export interface UpdateAdapterConfigReq { addr: string; port: number; token: str
 export interface ProviderResp { id: string; created_at: string; name: string; type: string; endpoint: string; token: string; model: string; temperature: number; is_active: boolean; enable_thinking: boolean; api_mode: string; thinking_effort: string; thinking_budget: number; max_tokens: number; top_p: number | null; top_k: number | null; frequency_penalty: number | null; presence_penalty: number | null; repetition_penalty: number | null; provider_key: string; auth_header: string; url_mode: string }
 export interface ProviderPresetProtocol { api_mode: string; base_url: string; auth_header: string; note?: string }
 export interface ProviderPreset { key: string; name: string; protocols: ProviderPresetProtocol[] }
+export interface ListProviderModelsReq { endpoint: string; token: string; auth_header: string; api_mode?: string }
+export interface ProviderModelsResp { ok: boolean; message: string; models: string[] }
 export interface AddProviderReq { name: string; type: string; endpoint: string; token: string; model: string; temperature?: number; isActive: boolean; enable_thinking: boolean; api_mode: string; thinking_effort: string; thinking_budget: number; max_tokens: number; top_p: number | null; top_k: number | null; frequency_penalty: number | null; presence_penalty: number | null; repetition_penalty: number | null; provider_key: string; auth_header: string; url_mode: string }
 
 export interface MCPServerResp { id: string; name: string; server_url: string; headers: Record<string, any>; timeout: number; retry_count: number; tool_filter: string[]; auto_reconnect: boolean; is_active: boolean; created_at: string }
@@ -77,6 +79,7 @@ export const providerApi = {
   create: (data: AddProviderReq) => client.post('/providers', data),
   update: (id: string, data: AddProviderReq) => client.put(`/providers/${id}`, data),
   delete: (id: string) => client.delete(`/providers/${id}`),
+  listModels: (data: ListProviderModelsReq) => client.post('/providers/models', data),
   toggle: (id: string, is_active: boolean) => client.put(`/providers/${id}/toggle`, { is_active }),
   test: (data: AddProviderReq) => client.post('/providers/test', data),
 }

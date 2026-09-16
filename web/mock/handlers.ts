@@ -15,9 +15,92 @@ const now = () => new Date().toISOString()
 
 // --- Providers ---
 let providers = [
-  { id: UUID(), created_at: now(), name: 'OpenAI GPT-4o', type: 'text_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'gpt-4o', temperature: 0.7, is_active: true },
-  { id: UUID(), created_at: now(), name: 'DALL-E 3', type: 'image_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'dall-e-3', temperature: 0, is_active: true },
-  { id: UUID(), created_at: now(), name: 'OpenAI Embedding', type: 'embedding_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'text-embedding-3-small', temperature: 0, is_active: false },
+  { id: UUID(), created_at: now(), name: 'OpenAI GPT-4o', type: 'text_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'gpt-4o', temperature: 0.7, is_active: true, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+  { id: UUID(), created_at: now(), name: 'DALL-E 3', type: 'image_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'dall-e-3', temperature: 0, is_active: true, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+  { id: UUID(), created_at: now(), name: 'OpenAI Embedding', type: 'embedding_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'text-embedding-3-small', temperature: 0, is_active: false, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+]
+
+// --- Provider 厂商预设（与后端 internal/agent/provider/provider_presets.go 对齐） ---
+const providerPresets = [
+  {
+    key: 'deepseek', name: 'DeepSeek',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.deepseek.com', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.deepseek.com/anthropic', auth_header: 'x-api-key' },
+      { api_mode: 'openai_responses', base_url: 'https://api.deepseek.com', auth_header: 'bearer', note: '仅 deepseek-v4-flash 支持；无后续状态（previous_response_id/store 不支持）' },
+    ],
+  },
+  {
+    key: 'zhipu', name: '智谱 Z.AI',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://open.bigmodel.cn/api/paas/v4', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://open.bigmodel.cn/api/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'kimi', name: 'Moonshot Kimi',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.moonshot.cn/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.moonshot.cn/anthropic', auth_header: 'bearer' },
+    ],
+  },
+  {
+    key: 'alibaba', name: '阿里百炼',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://dashscope.aliyuncs.com/apps/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'volcengine', name: '火山方舟',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://ark.cn-beijing.volces.com/api/v3', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://ark.cn-beijing.volces.com/api/v3/anthropic', auth_header: 'bearer', note: '需 Coding Plan 订阅' },
+      { api_mode: 'openai_responses', base_url: 'https://ark.cn-beijing.volces.com/api/v3', auth_header: 'bearer', note: '250615+ 新版模型默认支持（doubao-1-5-pro-32k-character-250715 例外）' },
+    ],
+  },
+  {
+    key: 'minimax', name: 'MiniMax',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.minimaxi.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.minimaxi.com/anthropic', auth_header: 'bearer', note: '仅 M 系列支持' },
+    ],
+  },
+  {
+    key: 'xiaomi', name: '小米 MiMo',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.xiaomimimo.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.xiaomimimo.com/anthropic', auth_header: 'api-key' },
+    ],
+  },
+  {
+    key: 'stepfun', name: '阶跃星辰',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.stepfun.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.stepfun.com/step_plan', auth_header: 'bearer', note: '需 Step Plan 订阅' },
+    ],
+  },
+  {
+    key: 'tencent', name: '腾讯混元',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.hunyuan.cloud.tencent.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.hunyuan.cloud.tencent.com/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'baidu', name: '百度千帆',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://qianfan.baidubce.com/v2', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://qianfan.baidubce.com/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'siliconflow', name: '硅基流动',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.siliconflow.cn/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.siliconflow.cn/v1', auth_header: 'bearer' },
+    ],
+  },
 ]
 
 // --- MCP Servers ---
@@ -298,6 +381,23 @@ export const mockHandlers: MockHandler[] = [
     handler() { return ok(providers) }
   },
   {
+    // 厂商协议预设（照抄后端 internal/agent/provider/provider_presets.go）
+    method: 'GET', path: '/providers/presets',
+    handler() { return ok(providerPresets) }
+  },
+  {
+    // 测试连接（不落库）：mock 恒成功
+    method: 'POST', path: '/providers/test',
+    handler() { return ok({ ok: true, message: 'mock 环境：连接测试通过' }) }
+  },
+  {
+    // 模型列表代理：mock 返回固定示例列表
+    method: 'POST', path: '/providers/models',
+    handler() {
+      return ok({ ok: true, message: '已获取 6 个模型', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini', 'gpt-4o-audio-preview', 'chatgpt-4o-latest'] })
+    }
+  },
+  {
     method: 'GET', path: '/providers/:id',
     handler({ params }) {
       const p = providers.find((p) => p.id === params.id)
@@ -310,7 +410,7 @@ export const mockHandlers: MockHandler[] = [
       if (body.isActive) {
         providers.forEach((p) => { if (p.type === body.type) p.is_active = false })
       }
-      const p = { id: UUID(), created_at: now(), name: body.name, type: body.type, endpoint: body.endpoint, token: body.token, model: body.model, temperature: body.temperature ?? 0.7, is_active: body.isActive }
+      const p = { id: UUID(), created_at: now(), ...body }
       providers.push(p)
       return ok(p)
     }
