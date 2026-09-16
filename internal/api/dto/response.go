@@ -586,11 +586,10 @@ type JoinReviewRecordListResp struct {
 
 // JoinReviewConfigResp 加群审核配置。
 type JoinReviewConfigResp struct {
-	EnabledGroups  []int64           `json:"enabled_groups"`
-	Prompts        map[string]string `json:"prompts"`
-	ManualKeywords []string          `json:"manual_keywords"`
-	BatchSize      int               `json:"batch_size"`
-	FlushSeconds   int               `json:"flush_seconds"`
+	EnabledGroups []int64           `json:"enabled_groups"`
+	Prompts       map[string]string `json:"prompts"`
+	BatchSize     int               `json:"batch_size"`
+	FlushSeconds  int               `json:"flush_seconds"`
 }
 
 // GroupMgrQQListResp 白名单/管理员列表。

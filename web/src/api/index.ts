@@ -558,7 +558,6 @@ export interface JoinReviewRecordListResp { total: number; list: JoinReviewRecor
 export interface JoinReviewConfig {
   enabled_groups: number[]
   prompts: Record<string, string>
-  manual_keywords: string[]
   batch_size: number
   flush_seconds: number
 }

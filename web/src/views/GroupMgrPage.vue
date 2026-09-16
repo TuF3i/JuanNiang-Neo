@@ -485,17 +485,6 @@
                 <v-text-field v-model.number="joinCfgDraft.batch_size" label="批量阈值（条）" type="number" min="1" density="compact" hide-details />
                 <v-text-field v-model.number="joinCfgDraft.flush_seconds" label="触发窗口（秒）" type="number" min="1" density="compact" hide-details />
               </div>
-              <div class="mt-3">
-                <v-textarea
-                  v-model="manualKeywordsInput"
-                  label="转人工关键词（每行一个，可留空）"
-                  rows="2"
-                  auto-grow
-                  density="compact"
-                  hint="留言命中任一关键词的申请不进 AI 判定，直接留在待审列表由人工处理（大小写不敏感）"
-                  persistent-hint
-                />
-              </div>
             </v-card-text>
             <v-card-actions class="pa-4 pt-0">
               <v-btn color="primary" variant="tonal" :loading="savingJoinCfg" @click="saveJoinReviewConfig">保存</v-btn>
@@ -1092,8 +1081,7 @@ const recordTotal = ref(0)
 const decidingId = ref<number | null>(null)
 const savingJoinCfg = ref(false)
 const joinCfgDialog = ref(false)
-const joinCfgDraft = ref<JoinReviewConfig>({ enabled_groups: [], prompts: {}, manual_keywords: [], batch_size: 5, flush_seconds: 60 })
-const manualKeywordsInput = ref('')
+const joinCfgDraft = ref<JoinReviewConfig>({ enabled_groups: [], prompts: {}, batch_size: 5, flush_seconds: 60 })
 // 提示词弹窗独立草稿：与审核设置弹窗互不覆盖
 const promptDraft = ref<{ prompts: Record<string, string> }>({ prompts: {} })
 const promptCfgDialog = ref(false)
@@ -1216,10 +1204,7 @@ function loadJoinReviewAll() {
 function openJoinReviewConfig() {
   joinCfgDialog.value = true
   fetchJoinReviewConfig().then((cfg) => {
-    if (cfg) {
-      joinCfgDraft.value = cfg
-      manualKeywordsInput.value = cfg.manual_keywords.join('\n')
-    }
+    if (cfg) joinCfgDraft.value = cfg
   })
 }
 
@@ -1230,7 +1215,6 @@ async function fetchJoinReviewConfig(): Promise<JoinReviewConfig | null> {
     return {
       enabled_groups: res?.enabled_groups ?? [],
       prompts: { ...(res?.prompts ?? {}) },
-      manual_keywords: res?.manual_keywords ?? [],
       batch_size: res?.batch_size ?? 5,
       flush_seconds: res?.flush_seconds ?? 60,
     }
@@ -1248,7 +1232,6 @@ async function saveJoinReviewConfig() {
   const ok = await persistJoinReviewConfig({
     ...fresh,
     enabled_groups: d.enabled_groups.map(Number),
-    manual_keywords: manualKeywordsInput.value.split('\n').map((x) => x.trim()).filter(Boolean),
     batch_size: Number(d.batch_size) || 5,
     flush_seconds: Number(d.flush_seconds) || 60,
   })
