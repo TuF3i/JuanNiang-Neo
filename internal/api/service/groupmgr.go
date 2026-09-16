@@ -450,7 +450,7 @@ func (s *Service) TestGroupMgr(ctx context.Context, c *app.RequestContext) {
 func groupMgrConfigResp(cfg *models.GroupMgrConfig) dto.GroupMgrConfigResp {
 	return dto.GroupMgrConfigResp{
 		Enabled: cfg.Enabled, LLMReview: cfg.LLMReview,
-		BlackMinScore: cfg.BlackMinScore,
+		BlackMinScore:  cfg.BlackMinScore,
 		LLMBatchWindow: cfg.LLMBatchWindow,
 		ImgSpamWindow:  cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
 		EnableCopyCheck: cfg.EnableCopyCheck, CopyThreshold: cfg.CopyThreshold,
