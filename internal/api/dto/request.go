@@ -84,6 +84,14 @@ type AddProviderReq struct {
 // UpdateProviderReq 与 AddProviderReq 结构完全一致（覆盖更新），用类型别名复用避免重复维护。
 type UpdateProviderReq = AddProviderReq
 
+// ListProviderModelsReq 拉取厂商模型列表（后端代理 GET {endpoint}/models，绕开浏览器 CORS）。
+type ListProviderModelsReq struct {
+	Endpoint   string `json:"endpoint"`
+	Token      string `json:"token"`
+	AuthHeader string `json:"auth_header"` // bearer / x-api-key / api-key / 空
+	APIMode    string `json:"api_mode"`    // gemini_native 时 token 走 query 参数 key
+}
+
 type ToggleProviderReq struct {
 	IsActive bool `json:"is_active"`
 }

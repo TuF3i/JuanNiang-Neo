@@ -132,6 +132,13 @@ type TestProviderResp struct {
 	Message string `json:"message"` // 成功=模型回复；失败=错误详情
 }
 
+// ProviderModelsResp 厂商模型列表拉取结果（后端代理，绕开浏览器 CORS）。
+type ProviderModelsResp struct {
+	Ok      bool     `json:"ok"`
+	Message string   `json:"message"` // 成功=数量说明；失败=错误详情
+	Models  []string `json:"models"`
+}
+
 type MCPServerResp struct {
 	ID            string           `json:"id"`
 	Name          string           `json:"name"`
