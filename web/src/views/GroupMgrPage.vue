@@ -377,12 +377,13 @@
             <!-- 审核记录 -->
             <v-window-item value="records">
               <v-card-text>
-                <v-data-table
+                <v-data-table-server
                   :headers="joinRecordHeaders"
                   :items="joinRecords"
                   :loading="joinRecordsLoading"
-                  :items-length="recordTotal"
+                  :page="recordPage"
                   :items-per-page="recordPageSize"
+                  :items-length="recordTotal"
                   density="compact"
                   class="elevation-0"
                   @update:options="onRecordOptions"
@@ -508,7 +509,7 @@
                 <div class="text-caption text-medium-emphasis mt-3 mb-1">{{ groupTitle(promptGroupID ?? 0) }} 的审核提示词（留空使用内置默认）</div>
                 <v-textarea
                   :key="promptGroupID ?? 'none'"
-                  v-model="joinCfgDraft.prompts[String(promptGroupID)]"
+                  v-model="promptDraft.prompts[String(promptGroupID)]"
                   rows="4"
                   auto-grow
                   density="compact"
@@ -1081,6 +1082,8 @@ const decidingId = ref<number | null>(null)
 const savingJoinCfg = ref(false)
 const joinCfgDialog = ref(false)
 const joinCfgDraft = ref<JoinReviewConfig>({ enabled_groups: [], prompts: {}, batch_size: 5, flush_seconds: 60 })
+// 提示词弹窗独立草稿：与审核设置弹窗互不覆盖
+const promptDraft = ref<{ prompts: Record<string, string> }>({ prompts: {} })
 const promptCfgDialog = ref(false)
 const promptGroupID = ref<number | null>(null)
 // 提示词仅对生效群有意义：下拉选项跟随审核设置里的生效群
@@ -1200,13 +1203,16 @@ function loadJoinReviewAll() {
 
 function openJoinReviewConfig() {
   joinCfgDialog.value = true
-  loadJoinReviewConfig()
+  fetchJoinReviewConfig().then((cfg) => {
+    if (cfg) joinCfgDraft.value = cfg
+  })
 }
 
-async function loadJoinReviewConfig() {
+// 拉取最新配置（两个弹窗各自打开时调用，避免共享草稿互相覆盖未保存改动）
+async function fetchJoinReviewConfig(): Promise<JoinReviewConfig | null> {
   try {
     const res = (await groupMgrApi.joinReviewConfig()).data.data
-    joinCfgDraft.value = {
+    return {
       enabled_groups: res?.enabled_groups ?? [],
       prompts: { ...(res?.prompts ?? {}) },
       batch_size: res?.batch_size ?? 5,
@@ -1214,34 +1220,47 @@ async function loadJoinReviewConfig() {
     }
   } catch (e: any) {
     toastStore.error(e?.message || '加载加群审核配置失败')
+    return null
   }
 }
 
 async function saveJoinReviewConfig() {
-  if (await persistJoinReviewConfig()) joinCfgDialog.value = false
+  // 读-合并-写：仅覆写生效群与攒批参数，提示词保持库内最新值（不冲掉他人/其他弹窗改动）
+  const fresh = await fetchJoinReviewConfig()
+  if (!fresh) return
+  const d = joinCfgDraft.value
+  const ok = await persistJoinReviewConfig({
+    ...fresh,
+    enabled_groups: d.enabled_groups.map(Number),
+    batch_size: Number(d.batch_size) || 5,
+    flush_seconds: Number(d.flush_seconds) || 60,
+  })
+  if (ok) joinCfgDialog.value = false
 }
 
 async function openPromptConfig() {
   promptCfgDialog.value = true
-  await loadJoinReviewConfig()
+  const cfg = await fetchJoinReviewConfig()
+  if (cfg) {
+    promptDraft.value = { prompts: cfg.prompts }
+    joinCfgDraft.value = cfg
+  }
   // 默认选中第一个生效群，下方提示词随下拉切换自动刷新
   promptGroupID.value = joinCfgDraft.value.enabled_groups[0] ?? null
 }
 
 async function savePromptConfig() {
-  if (await persistJoinReviewConfig()) promptCfgDialog.value = false
+  // 读-合并-写：仅覆写提示词，生效群与攒批参数保持库内最新值
+  const fresh = await fetchJoinReviewConfig()
+  if (!fresh) return
+  const ok = await persistJoinReviewConfig({ ...fresh, prompts: promptDraft.value.prompts })
+  if (ok) promptCfgDialog.value = false
 }
 
-async function persistJoinReviewConfig(): Promise<boolean> {
+async function persistJoinReviewConfig(data: JoinReviewConfig): Promise<boolean> {
   savingJoinCfg.value = true
   try {
-    const d = joinCfgDraft.value
-    await groupMgrApi.updateJoinReviewConfig({
-      enabled_groups: d.enabled_groups.map(Number),
-      prompts: d.prompts,
-      batch_size: Number(d.batch_size) || 5,
-      flush_seconds: Number(d.flush_seconds) || 60,
-    })
+    await groupMgrApi.updateJoinReviewConfig(data)
     toastStore.success('加群审核配置已保存')
     return true
   } catch (e: any) {
