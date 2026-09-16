@@ -403,7 +403,7 @@ export const mockHandlers: MockHandler[] = [
       if (body.isActive) {
         providers.forEach((p) => { if (p.type === body.type) p.is_active = false })
       }
-      const p = { id: UUID(), created_at: now(), name: body.name, type: body.type, endpoint: body.endpoint, token: body.token, model: body.model, temperature: body.temperature ?? 0.7, is_active: body.isActive }
+      const p = { id: UUID(), created_at: now(), ...body }
       providers.push(p)
       return ok(p)
     }
