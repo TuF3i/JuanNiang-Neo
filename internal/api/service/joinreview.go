@@ -20,10 +20,11 @@ import (
 func joinReviewConfigResp(cfg *models.GroupJoinReviewConfig) dto.JoinReviewConfigResp {
 	if cfg == nil {
 		return dto.JoinReviewConfigResp{
-			EnabledGroups: []int64{},
-			Prompts:       map[string]string{},
-			BatchSize:     5,
-			FlushSeconds:  60,
+			EnabledGroups:  []int64{},
+			Prompts:        map[string]string{},
+			ManualKeywords: []string{},
+			BatchSize:      5,
+			FlushSeconds:   60,
 		}
 	}
 	prompts := map[string]string{}
@@ -32,11 +33,14 @@ func joinReviewConfigResp(cfg *models.GroupJoinReviewConfig) dto.JoinReviewConfi
 	}
 	groups := make([]int64, 0, len(cfg.EnabledGroups))
 	groups = append(groups, cfg.EnabledGroups...)
+	keywords := make([]string, 0, len(cfg.ManualKeywords))
+	keywords = append(keywords, cfg.ManualKeywords...)
 	return dto.JoinReviewConfigResp{
-		EnabledGroups: groups,
-		Prompts:       prompts,
-		BatchSize:     cfg.BatchSize,
-		FlushSeconds:  cfg.FlushSeconds,
+		EnabledGroups:  groups,
+		Prompts:        prompts,
+		ManualKeywords: keywords,
+		BatchSize:      cfg.BatchSize,
+		FlushSeconds:   cfg.FlushSeconds,
 	}
 }
 
@@ -81,8 +85,13 @@ func (s *Service) UpdateJoinReviewConfig(ctx context.Context, c *app.RequestCont
 	if prompts == nil {
 		prompts = models.StringMap{}
 	}
+	keywords := models.JSONSlice(data.ManualKeywords)
+	if keywords == nil {
+		keywords = models.JSONSlice{}
+	}
 	cfg.EnabledGroups = groups
 	cfg.Prompts = prompts
+	cfg.ManualKeywords = keywords
 	if data.BatchSize > 0 {
 		cfg.BatchSize = data.BatchSize
 	}

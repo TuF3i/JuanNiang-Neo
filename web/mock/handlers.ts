@@ -221,6 +221,7 @@ let joinReviewConfig = {
     555666777: '这是红岩网校工作站招新群，主要面向重邮对前端/后端/运维感兴趣的新生。',
     888999000: '',
   } as Record<string, string>,
+  manual_keywords: ['广告', '推广'] as string[],
   batch_size: 5,
   flush_seconds: 60,
 }
@@ -1138,6 +1139,7 @@ export const mockHandlers: MockHandler[] = [
       joinReviewConfig = {
         enabled_groups: (body?.enabled_groups || []).map(Number),
         prompts: body?.prompts || {},
+        manual_keywords: body?.manual_keywords || [],
         batch_size: Number(body?.batch_size) || 5,
         flush_seconds: Number(body?.flush_seconds) || 60,
       }

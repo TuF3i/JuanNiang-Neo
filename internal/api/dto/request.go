@@ -393,10 +393,11 @@ type UpdateGroupMgrConfigReq struct {
 
 // UpdateJoinReviewConfigReq 更新加群审核配置（生效群 / 每群提示词 / 攒批阈值 / 触发窗口）。
 type UpdateJoinReviewConfigReq struct {
-	EnabledGroups []int64           `json:"enabled_groups"`
-	Prompts       map[string]string `json:"prompts"`
-	BatchSize     int               `json:"batch_size"`
-	FlushSeconds  int               `json:"flush_seconds"`
+	EnabledGroups  []int64           `json:"enabled_groups"`
+	Prompts        map[string]string `json:"prompts"`
+	ManualKeywords []string          `json:"manual_keywords"`
+	BatchSize      int               `json:"batch_size"`
+	FlushSeconds   int               `json:"flush_seconds"`
 }
 
 // JoinReviewDecisionReq 人工审核加群请求（通过/拒绝，拒绝理由随动作发送给申请者）。

@@ -259,17 +259,18 @@ func (m *Manager) flushGroup(ctx context.Context, gid int64) {
 	}
 
 	cfg := m.getCfg(ctx)
-	// 提示词注入防护：留言含标记伪造特征的申请不送 AI（避免扰动批量判定结构），转人工处理
+	// AI 送审前过滤：提示词注入 / 命中转人工关键词的申请不送 AI（避免扰动批量判定结构），转人工处理
 	var aiItems, manualItems []*models.GroupJoinRequest
 	for _, rec := range claimed {
-		if containsPromptInjection(rec.Comment) {
-			manualItems = append(manualItems, rec)
+		reason := aiSkipReason(rec.Comment, cfg)
+		if reason == "" {
+			aiItems = append(aiItems, rec)
 			continue
 		}
-		aiItems = append(aiItems, rec)
+		manualItems = append(manualItems, rec)
+		log.Info("加群申请跳过 AI 转人工", "group", gid, "user", rec.UserID, "reason", reason)
 	}
 	if len(manualItems) > 0 {
-		log.Warn("加群申请疑似提示词注入，转人工处理", "group", gid, "count", len(manualItems))
 		for _, rec := range manualItems {
 			_ = m.dao.ReleaseRequest(ctx, rec.ID)
 		}
@@ -391,6 +392,23 @@ func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest
 		log.Error("待审请求释放失败", "id", rec.ID, "err", err)
 	}
 	return execErr
+}
+
+// aiSkipReason 判断该申请是否跳过 AI 转人工；返回空串 = 正常送 AI。
+// 规则：提示词注入特征 > 命中管理员配置的转人工关键词（大小写不敏感包含匹配）。
+func aiSkipReason(comment string, cfg *models.GroupJoinReviewConfig) string {
+	if containsPromptInjection(comment) {
+		return "留言含提示词注入特征"
+	}
+	if cfg != nil {
+		lc := strings.ToLower(comment)
+		for _, kw := range cfg.ManualKeywords {
+			if kw = strings.TrimSpace(kw); kw != "" && strings.Contains(lc, strings.ToLower(kw)) {
+				return "留言命中转人工关键词: " + kw
+			}
+		}
+	}
+	return ""
 }
 
 // groupPromptKey 每群提示词在配置 map 中的键（群号十进制字符串）。
