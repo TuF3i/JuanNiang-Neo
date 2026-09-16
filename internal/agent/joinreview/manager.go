@@ -12,6 +12,7 @@ package joinreview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -39,6 +40,9 @@ const (
 type RequestExecutor interface {
 	HandleGroupRequest(flag, subType string, approve bool, reason string) error
 }
+
+// ErrRequestBusy 请求正在审核中或已被处理（人工与 AI 抢占失败）。
+var ErrRequestBusy = errors.New("该请求正在审核中或已被处理")
 
 // Manager 加群审核。
 type Manager struct {
@@ -86,8 +90,30 @@ func (m *Manager) Reload(ctx context.Context) error {
 	m.cfg = cfg
 	m.cfgAt = time.Now()
 	m.cfgMu.Unlock()
+	m.pruneDisabledBuffers(cfg)
 	log.Info("加群审核配置已重载", "enabled_groups", len(cfg.EnabledGroups), "batch_size", cfg.BatchSize, "flush_seconds", cfg.FlushSeconds)
 	return nil
+}
+
+// pruneDisabledBuffers 配置变更后清理已移出生效群的攒批缓冲并停掉其窗口定时器，
+// 避免已移出的群继续被 AI 送审；缓冲中的请求保持 pending 落库状态，面板可人工处理。
+func (m *Manager) pruneDisabledBuffers(cfg *models.GroupJoinReviewConfig) {
+	enabled := map[int64]bool{}
+	for _, g := range cfg.EnabledGroups {
+		enabled[g] = true
+	}
+	m.bufMu.Lock()
+	defer m.bufMu.Unlock()
+	for gid := range m.buf {
+		if enabled[gid] {
+			continue
+		}
+		delete(m.buf, gid)
+		if t := m.timers[gid]; t != nil {
+			t.Stop()
+			delete(m.timers, gid)
+		}
+	}
 }
 
 // getCfg 读取配置缓存（TTL 内直接返回；过期重载，失败回退缓存/默认）。
@@ -142,10 +168,11 @@ func (m *Manager) Interested(ctx context.Context, groupID int64) bool {
 
 // Enqueue 加群请求进入审核流：落库（待审列表可见）+ 入按群攒批缓冲。
 // 本群首条入队开启触发窗口定时器；攒满阈值立即异步送审（定时器到点后发现缓冲已空则空转）。
-func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) {
+// 返回是否成功接管：落库失败返回 false，调用方应放行事件继续走插件兜底，避免吞掉请求。
+func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 	req := ev.Request
 	if req == nil || req.GroupID <= 0 || req.UserID <= 0 {
-		return
+		return false
 	}
 	rec := &models.GroupJoinRequest{
 		GroupID: req.GroupID,
@@ -157,7 +184,7 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) {
 	if err := m.dao.RequestCreate(ctx, rec); err != nil {
 		// 落库失败不进缓冲：请求不出现在待审列表会造成"AI 审了但面板无记录"的裂痕
 		log.Error("加群请求落库失败，跳过审核", "group", req.GroupID, "user", req.UserID, "err", err)
-		return
+		return false
 	}
 
 	cfg := m.getCfg(ctx)
@@ -180,6 +207,7 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) {
 	if full {
 		go m.flushGroup(ctx, req.GroupID)
 	}
+	return true
 }
 
 // bufSnapshot 缓冲快照长度（日志用）。
@@ -212,22 +240,66 @@ func (m *Manager) flushGroup(ctx context.Context, gid int64) {
 		return // 满批提前触发后，旧窗口定时器到点空转
 	}
 
-	cfg := m.getCfg(ctx)
-	results, err := m.reviewBatch(ctx, cfg, gid, items)
-	if err != nil {
-		log.Warn("加群审核 LLM 整批失败，留待人工处理", "group", gid, "count", len(items), "err", err)
+	// 逐条原子抢占（pending → processing）：已被人工抢先处理的请求跳过
+	claimed := make([]*models.GroupJoinRequest, 0, len(items))
+	for _, rec := range items {
+		ok, err := m.dao.ClaimRequest(ctx, rec.ID)
+		if err != nil {
+			log.Warn("加群请求抢占失败，留待人工处理", "id", rec.ID, "err", err)
+			continue
+		}
+		if !ok {
+			log.Info("加群请求已被人工抢占，跳过 AI 审核", "id", rec.ID)
+			continue
+		}
+		claimed = append(claimed, rec)
+	}
+	if len(claimed) == 0 {
 		return
 	}
-	for i, rec := range items {
+
+	cfg := m.getCfg(ctx)
+	// 提示词注入防护：留言含标记伪造特征的申请不送 AI（避免扰动批量判定结构），转人工处理
+	var aiItems, manualItems []*models.GroupJoinRequest
+	for _, rec := range claimed {
+		if containsPromptInjection(rec.Comment) {
+			manualItems = append(manualItems, rec)
+			continue
+		}
+		aiItems = append(aiItems, rec)
+	}
+	if len(manualItems) > 0 {
+		log.Warn("加群申请疑似提示词注入，转人工处理", "group", gid, "count", len(manualItems))
+		for _, rec := range manualItems {
+			_ = m.dao.ReleaseRequest(ctx, rec.ID)
+		}
+	}
+	if len(aiItems) == 0 {
+		return
+	}
+
+	results, err := m.reviewBatch(ctx, cfg, gid, aiItems)
+	if err != nil {
+		// 整批失败：释放回 pending，请求仍出现在待审列表供人工处理
+		log.Warn("加群审核 LLM 整批失败，释放回待审", "group", gid, "count", len(aiItems), "err", err)
+		for _, rec := range aiItems {
+			_ = m.dao.ReleaseRequest(ctx, rec.ID)
+		}
+		return
+	}
+	for i, rec := range aiItems {
 		res, ok := results[i]
 		if !ok {
-			// 该条无有效裁决（索引越界/非法 verdict/缺失）：留待人工
-			log.Warn("加群审核裁决缺失，留待人工处理", "group", gid, "user", rec.UserID)
+			// 该条无有效裁决（索引越界/非法 verdict/缺失）：释放回待审
+			log.Warn("加群审核裁决缺失，释放回待审", "group", gid, "user", rec.UserID)
+			_ = m.dao.ReleaseRequest(ctx, rec.ID)
 			continue
 		}
 		approve := res.Verdict == "approve"
 		log.Info("加群审核 AI 裁决", "group", gid, "user", rec.UserID, "verdict", res.Verdict, "reason", res.Reason)
-		m.applyVerdict(ctx, rec, approve, "ai", res.Reason)
+		if err := m.applyVerdict(ctx, rec, approve, "ai", res.Reason); err != nil {
+			log.Warn("加群审核裁决执行失败，保留待审行", "group", gid, "user", rec.UserID, "err", err)
+		}
 	}
 }
 
@@ -255,10 +327,20 @@ func (m *Manager) removeBuf(gid int64, id uint) {
 }
 
 // ManualDecide 人工审核（Web 面板）：执行裁决并落终态记录。
-// 若请求仍在 AI 攒批窗口内，先从缓冲摘除，防止 AI 稍后重复审核同一请求。
+// 先原子抢占（pending → processing），防止与 AI 攒批或并发人工操作重复执行；
+// 仍在 AI 攒批窗口内的请求同步从缓冲摘除。返回值透传执行错误（OneBot 失败等），
+// 供 API 层提示管理员（终态记录与待审行状态由 applyVerdict 内部保证）。
 func (m *Manager) ManualDecide(ctx context.Context, id uint, approve bool, reason string) error {
+	ok, err := m.dao.ClaimRequest(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrRequestBusy
+	}
 	rec, err := m.dao.RequestGet(ctx, id)
 	if err != nil {
+		_ = m.dao.ReleaseRequest(ctx, id)
 		return err
 	}
 	m.removeBuf(rec.GroupID, rec.ID)
@@ -269,13 +351,13 @@ func (m *Manager) ManualDecide(ctx context.Context, id uint, approve bool, reaso
 			reason = "管理员手动拒绝"
 		}
 	}
-	m.applyVerdict(ctx, rec, approve, "manual", reason)
-	return nil
+	return m.applyVerdict(ctx, rec, approve, "manual", reason)
 }
 
-// applyVerdict 单条审核终态：调 OneBot 执行（通过/拒绝）→ 落审核记录 → 执行成功才删待审行。
-// 执行失败（flag 过期/平台错误等）保留待审行，理由附加失败说明，人工可在 QQ 或面板重试。
-func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, approve bool, reviewer, reason string) {
+// applyVerdict 单条审核终态：调 OneBot 执行（通过/拒绝）→ 落审核记录 → 两者皆成功才删待审行。
+// 返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
+// 执行失败（flag 过期/平台错误等）或审核记录落库失败时，待审行释放回 pending 保留可重试。
+func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, approve bool, reviewer, reason string) error {
 	verdict := "reject"
 	if approve {
 		verdict = "approve"
@@ -296,13 +378,19 @@ func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest
 		Reason:     reason,
 		ReviewedAt: time.Now(),
 	}); err != nil {
-		log.Error("加群审核记录落库失败", "group", rec.GroupID, "user", rec.UserID, "err", err)
+		// 审核记录未落库：释放回 pending，避免面板丢失该请求（执行可能已成功，人工可复核）
+		log.Error("加群审核记录落库失败，请求释放回待审", "group", rec.GroupID, "user", rec.UserID, "err", err)
+		_ = m.dao.ReleaseRequest(ctx, rec.ID)
+		return fmt.Errorf("审核记录落库失败: %w", err)
 	}
 	if execErr == nil {
 		if err := m.dao.RequestDelete(ctx, rec.ID); err != nil {
 			log.Error("待审请求删除失败", "id", rec.ID, "err", err)
 		}
+	} else if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
+		log.Error("待审请求释放失败", "id", rec.ID, "err", err)
 	}
+	return execErr
 }
 
 // groupPromptKey 每群提示词在配置 map 中的键（群号十进制字符串）。

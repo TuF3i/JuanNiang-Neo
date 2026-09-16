@@ -68,6 +68,24 @@ func (d *JoinReviewDAO) RequestDelete(ctx context.Context, id uint) error {
 	return d.db.WithContext(ctx).Delete(&models.GroupJoinRequest{}, id).Error
 }
 
+// ClaimRequest 原子抢占待审请求（pending → processing）。
+// 返回是否抢占成功：人工审核与 AI 攒批并发时只有一方能成功，失败方必须立即放弃，
+// 避免同一请求被重复审核与重复执行 OneBot 动作。
+func (d *JoinReviewDAO) ClaimRequest(ctx context.Context, id uint) (bool, error) {
+	res := d.db.WithContext(ctx).Model(&models.GroupJoinRequest{}).
+		Where("id = ? AND status = ?", id, "pending").
+		Update("status", "processing")
+	return res.RowsAffected > 0, res.Error
+}
+
+// ReleaseRequest 释放抢占（processing → pending）：LLM 整批失败、裁决缺失或
+// 审核记录落库失败时调用，请求回到待审列表供人工处理。
+func (d *JoinReviewDAO) ReleaseRequest(ctx context.Context, id uint) error {
+	return d.db.WithContext(ctx).Model(&models.GroupJoinRequest{}).
+		Where("id = ? AND status = ?", id, "processing").
+		Update("status", "pending").Error
+}
+
 // ---------- 审核记录 ----------
 
 // ReviewCreate 写入审核记录（AI 与人工统一入口）。

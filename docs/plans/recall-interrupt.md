@@ -51,27 +51,39 @@ recallMu      sync.Mutex
 recallCancels map[string]context.CancelFunc // message_id 十进制串 → agentCancel
 ```
 
-- `handleMessage`：把 `agentCtx, agentCancel := context.WithTimeout(...)` 上移到 `Loops.Register` 同一区块；组内全部非 0 `MessageID` 都注册到同一个 `agentCancel`；`defer` 中注销注册表 + `Loops.Unregister` + `agentCancel()`。
-- 取消后 `iter.Next()` 送达 Err 事件 → 走现有 `event.Err` break 分支；outcome 判定用 `errors.Is(agentCtx.Err(), context.Canceled)` → 新增 `"cancelled"`（与超时 `DeadlineExceeded` 区分，超时行为保持现状）。
+- `handleMessage`：把 agentCtx 的创建上移到 `Loops.Register` 同一区块，并用**专用撤回 cause** 区分取消来源（`context.Canceled` 无法区分用户撤回与父级取消/服务关停）：
+
+```go
+timeoutCtx, timeoutCancel := context.WithTimeoutCause(ctx, agentRunTimeout, ErrAgentRunTimeout)
+defer timeoutCancel()
+agentCtx, agentCancel := context.WithCancelCause(timeoutCtx)
+defer agentCancel(nil)
+// 组内全部非 0 MessageID 注册 agentCancel；撤回处理中调用 agentCancel(ErrRecalled)
+```
+
+- 取消后 `iter.Next()` 送达 Err 事件 → 走现有 `event.Err` break 分支；收尾判定用 `context.Cause(agentCtx)`：
+  - `errors.Is(cause, ErrRecalled)` → 用户撤回：outcome=`"cancelled"`，走撤回短路
+  - `errors.Is(cause, ErrAgentRunTimeout)` → 5 分钟超时：行为保持现状（outcome=`"timeout"`）
+  - `errors.Is(cause, context.Canceled)` → 父级取消/服务关停：按现有 error 收尾，**不**标 cancelled、不触发撤回语义
 
 ### 3.4 finish 短路（核心安全点）
 
 finish 闭包开头：
 
 ```go
-if errors.Is(agentCtx.Err(), context.Canceled) {
-    // 撤回中断：丢弃半截回复与工具待发队列，用户侧记录已在派发前写入，直接收尾
+if errors.Is(context.Cause(agentCtx), ErrRecalled) {
+    // 仅用户撤回触发：丢弃半截回复与工具待发队列，用户侧记录已在派发前写入，直接收尾
     log.Info("消息已撤回，中断回复", ...)
     return
 }
 ```
 
 跳过：WaitReview 闸门、`deferredSends.Flush`、`sendReply`、assistant 侧 recordChat 与短期记忆写入。
-超时（DeadlineExceeded）路径行为不变。
+超时（`ErrAgentRunTimeout`）与父级取消（`context.Canceled`）路径行为不变。
 
 ### 3.5 短期记忆标记
 
-- `internal/core/cache/cache.go` 新增 Lua 原子脚本 `MarkMsgRecalled(key, msgID, marker)`：LRANGE 找 `decoded.msg_id` 匹配项 → LSET 把 content 前缀加 marker；无匹配返回 0（参考同文件 RPushIfMsgIDAbsent 的脚本写法）。
+- `internal/core/cache/cache.go` 新增 Lua 原子脚本 `MarkMsgRecalled(key, msgID, marker)`：LRANGE 找 `decoded.msg_id` 匹配项 → LSET 把 content 前缀加 marker；无匹配返回 0（参考同文件 RPushIfMsgIDAbsent 的脚本写法）。注意：字段名与短期记忆 `ChatMessage.MsgID` 的 json 序列化键 `msg_id` 严格一致；`msgID` 入参必须是 `strconv.FormatInt(message_id)` 的**十进制字符串**，与存储值做字符串等值比对（OneBot message_id 可能为负数，勿做数值转换或正负归一）。
 - `shortterm.go` 新增 `MarkRecalledByMsgID(ctx, areaID, msgID, marker)`；`memory/memory.go` 加转发 `MarkShortTermMessageRecalled`。
 - marker 文案：`【该消息已被发送者撤回】` + 原内容（原文保留，LLM 能理解语境与用户意图变化）。
 

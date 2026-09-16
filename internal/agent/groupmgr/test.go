@@ -47,23 +47,40 @@ func (m *Manager) TestViolation(ctx context.Context, text string) *TestReport {
 			rep.Reason = "RAG 黑名单命中（分数 " + fscore(v.black.score) + " ≥ " + fscore(cfg.BlackMinScore) + "）→ 直接处罚"
 			return rep
 		}
-		// 未命中 / 未达阈值 → LLM 统一判定（批窗口）
-		rep.Verdict = "review"
-		rep.Reason = "未命中黑名单 → LLM 统一判定（3s 批窗口，逐条独立）"
+		// 未命中 / 未达阈值 → LLM 统一判定（批窗口）；LLMReview 关闭 → 关键词兜底直判
+		if cfg.LLMReview {
+			rep.Verdict = "review"
+			rep.Reason = "未命中黑名单 → LLM 统一判定（3s 批窗口，逐条独立）"
+			return rep
+		}
+		if rep.WordCat == "sensitive" || rep.WordCat == "black" || card {
+			rep.Verdict = "punish"
+			rep.Reason = "LLMReview 关闭 → 关键词兜底（敏感/黑词/卡片直罚）"
+			return rep
+		}
+		rep.Verdict = "pass"
+		rep.Reason = "LLMReview 关闭 → 关键词兜底放行"
 		return rep
 	}
 
-	// RAG 不可用 → 先 LLM 判定；LLM 也不可用 → 关键词兜底（仅两者均失败）
-	switch {
-	case rep.WordCat == "sensitive" || rep.WordCat == "black" || card:
+	// RAG 不可用 → 先 LLM 统一判定（LLMReview 开启时不分词类全量送审，与生产
+	// handleRAGUnavailablePath 一致）；LLMReview 关闭或 LLM 不可用 → 关键词兜底直判
+	// （敏感/黑词/卡片直罚，灰词/无词放行）。
+	if cfg.LLMReview {
 		rep.Verdict = "review"
 		rep.Reason = "RAG 不可用 → LLM 统一判定；LLM 也不可用时关键词兜底（高危复核，LLM 挂则直罚）"
+		return rep
+	}
+	switch {
+	case rep.WordCat == "sensitive" || rep.WordCat == "black" || card:
+		rep.Verdict = "punish"
+		rep.Reason = "RAG/LLM 均不可用 → 关键词兜底（敏感/黑词/卡片直罚）"
 	case rep.WordCat == "gray":
-		rep.Verdict = "review"
-		rep.Reason = "RAG 不可用 → LLM 统一判定；LLM 也不可用时灰色词放行"
+		rep.Verdict = "pass"
+		rep.Reason = "RAG/LLM 均不可用 → 关键词兜底（灰词放行）"
 	default:
 		rep.Verdict = "pass"
-		rep.Reason = "RAG 不可用且无关键词命中 → 放行"
+		rep.Reason = "RAG/LLM 均不可用且无关键词命中 → 放行"
 	}
 	return rep
 }
