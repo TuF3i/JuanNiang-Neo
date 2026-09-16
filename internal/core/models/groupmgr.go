@@ -9,16 +9,17 @@ import (
 // ---------- 群管理（系统级功能，替代 redrock_group_manager Lua 插件） ----------
 
 // GroupMgrConfig 群管理配置（单行表）。
-// 阈值语义：RAG 语义匹配双集合——命中黑名单语录 score ≥ BlackMinScore 直接处罚；
-// 命中白名单语录 score ≥ WhiteMinScore 放行；均未命中送 LLM 统一判定；
-// 关键词仅作最后兜底（RAG/LLM 均不可用时）。
+// 阈值语义：RAG 语义匹配黑名单——命中黑名单语录 score ≥ BlackMinScore 按样本类型直接处罚；
+// 未命中/未达阈值送 LLM 统一判定；关键词仅作最后兜底（RAG/LLM 均不可用时）。
+// 白名单语录体系已剔除（WhiteMinScore/WhiteGCIntervalDays 列保留兼容存量数据，不再使用）。
 type GroupMgrConfig struct {
 	ID            uint    `gorm:"primarykey"`
 	Enabled       bool    `gorm:"not null;default:false"` // 总开关
-	LLMReview     bool    `gorm:"not null;default:true"`  // LLM 审核开关（关闭后仅 RAG 黑白匹配 + 关键词兜底）
+	LLMReview     bool    `gorm:"not null;default:true"`  // LLM 审核开关（关闭后仅 RAG 黑名单匹配 + 关键词兜底）
 	BlackMinScore float64 `gorm:"not null;default:0.7"`   // 黑名单语录命中阈值（≥ 处罚）
-	WhiteMinScore float64 `gorm:"not null;default:0.75"`  // 白名单语录命中阈值（≥ 放行）
-	// 已废弃（新语义改用 BlackMinScore/WhiteMinScore；列保留兼容存量数据）
+	// 已废弃（白名单语录体系剔除；列保留兼容存量数据）
+	WhiteMinScore float64 `gorm:"not null;default:0.75"`
+	// 已废弃（新语义改用 BlackMinScore；列保留兼容存量数据）
 	HighScore     float64 `gorm:"not null;default:0.75"`
 	LowScore      float64 `gorm:"not null;default:0.5"`
 	FallbackScore float64 `gorm:"not null;default:0.6"`
@@ -48,7 +49,7 @@ type GroupMgrConfig struct {
 	LLMGrayPrompt     string `gorm:"type:text"` // 已废弃（保留兼容）
 	LLMHighRiskPrompt string `gorm:"type:text"` // 已废弃（保留兼容）
 
-	// WhiteGCIntervalDays 白名单语录 GC 周期（天）：周期内未被命中（LastUsedAt）的语录被清理。
+	// WhiteGCIntervalDays 白名单语录 GC 周期（已废弃：白名单语录体系剔除，GC 随之移除；列保留兼容）。
 	WhiteGCIntervalDays int `gorm:"not null;default:7"`
 
 	CreatedAt time.Time
@@ -82,11 +83,12 @@ func (GroupMgrWord) TableName() string { return "group_mgr_words" }
 // GroupMgrSample RAG 违规样本（向量库本体，tag = ragtag.Sample(id)）。
 // 来源：seed（词条/关键词导入种子，WordID 关联）、learn（LLM 确认违规自动入库）、import（txt 导入）。
 // WordID > 0 表示该样本由对应词条派生：删除词条时同步删除样本 + RAG 向量（对账清理）。
-// ListType 区分黑白名单语录：black 命中处罚 / white 命中放行；LastUsedAt 供 GC 清理未使用记录。
+// ListType：黑名单语录（black）命中处罚；白名单语录（white）体系已剔除，
+// 存量 white 行保留不使用（检索/同步/展示均跳过）；LastUsedAt 供 GC 清理未使用记录。
 type GroupMgrSample struct {
 	ID         uint       `gorm:"primarykey"`
 	WordID     uint       `gorm:"index;default:0"`                // 关联词条 ID（0 = 非词条派生样本）
-	ListType   string     `gorm:"not null;default:'black';index"` // black / white
+	ListType   string     `gorm:"not null;default:'black';index"` // black（white 已废弃，存量保留不使用）
 	Text       string     `gorm:"type:text;not null"`
 	Category   string     `gorm:"not null;index"` // ad / sensitive（仅 black 语录有意义）
 	Source     string     `gorm:"not null;default:'seed'"`

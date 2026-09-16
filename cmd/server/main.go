@@ -28,6 +28,7 @@ import (
 	"JuanNiang-Neo/internal/agent"
 	"JuanNiang-Neo/internal/agent/fishcal"
 	"JuanNiang-Neo/internal/agent/groupmgr"
+	"JuanNiang-Neo/internal/agent/joinreview"
 	"JuanNiang-Neo/internal/agent/prompt"
 	"JuanNiang-Neo/internal/agent/scheduledmsg"
 	"JuanNiang-Neo/internal/agent/stats"
@@ -307,10 +308,15 @@ func main() {
 		log.Error("群管理初始化失败", "err", err)
 	} else {
 		go gm.Run(ctx)
-		// 白名单语录 GC：周期性清理未命中语录（在 Run 初始化成功后启动，避免并发 Init）
-		go gm.StartWhiteGC(ctx)
 	}
 	hago.GroupMgr = gm
+
+	// ---------- 6.6 加群请求 AI 攒批审核（Phase 0.6 接管生效群的加群请求） ----------
+	jr := joinreview.New(coreInst.DAO.JoinReview, adapterProv, hago.Providers)
+	if err := jr.Init(ctx); err != nil {
+		log.Error("加群审核初始化失败", "err", err)
+	}
+	hago.JoinReview = jr
 	// 系统命令：后注册覆盖插件同名命令（命令树覆盖语义），旧插件停用前不冲突
 	pluginEngine.RegisterBuiltinCommand([]string{"groupstats"}, pluggin.CommandOpts{
 		Description: "查看群管理统计数据（管理员）",
@@ -327,6 +333,7 @@ func main() {
 
 	svc := service.New(coreInst.DAO, adapterProv, webhookAdapter, pluginEngine)
 	svc.GroupMgr = gm
+	svc.JoinReview = jr
 	// 插件商店客户端（拉取元数据 / 安装 / 镜像源管理），数据目录持久化配置。
 	svc.StoreClient = pluggin.NewStoreClient("data")
 	svc.ProviderGroup = hago.Providers

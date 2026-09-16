@@ -12,6 +12,8 @@ export interface UpdateAdapterConfigReq { addr: string; port: number; token: str
 export interface ProviderResp { id: string; created_at: string; name: string; type: string; endpoint: string; token: string; model: string; temperature: number; is_active: boolean; enable_thinking: boolean; api_mode: string; thinking_effort: string; thinking_budget: number; max_tokens: number; top_p: number | null; top_k: number | null; frequency_penalty: number | null; presence_penalty: number | null; repetition_penalty: number | null; provider_key: string; auth_header: string; url_mode: string }
 export interface ProviderPresetProtocol { api_mode: string; base_url: string; auth_header: string; note?: string }
 export interface ProviderPreset { key: string; name: string; protocols: ProviderPresetProtocol[] }
+export interface ListProviderModelsReq { endpoint: string; token: string; auth_header: string; api_mode?: string }
+export interface ProviderModelsResp { ok: boolean; message: string; models: string[] }
 export interface AddProviderReq { name: string; type: string; endpoint: string; token: string; model: string; temperature?: number; isActive: boolean; enable_thinking: boolean; api_mode: string; thinking_effort: string; thinking_budget: number; max_tokens: number; top_p: number | null; top_k: number | null; frequency_penalty: number | null; presence_penalty: number | null; repetition_penalty: number | null; provider_key: string; auth_header: string; url_mode: string }
 
 export interface MCPServerResp { id: string; name: string; server_url: string; headers: Record<string, any>; timeout: number; retry_count: number; tool_filter: string[]; auto_reconnect: boolean; is_active: boolean; created_at: string }
@@ -77,6 +79,7 @@ export const providerApi = {
   create: (data: AddProviderReq) => client.post('/providers', data),
   update: (id: string, data: AddProviderReq) => client.put(`/providers/${id}`, data),
   delete: (id: string) => client.delete(`/providers/${id}`),
+  listModels: (data: ListProviderModelsReq) => client.post('/providers/models', data),
   toggle: (id: string, is_active: boolean) => client.put(`/providers/${id}/toggle`, { is_active }),
   test: (data: AddProviderReq) => client.post('/providers/test', data),
 }
@@ -486,7 +489,6 @@ export interface GroupMgrConfigResp {
   enabled: boolean
   llm_review: boolean
   black_min_score: number
-  white_min_score: number
   llm_batch_window: number
   img_spam_window: number
   img_spam_threshold: number
@@ -499,14 +501,12 @@ export interface GroupMgrConfigResp {
   llm_criteria: string
   llm_gray_prompt: string
   llm_high_risk_prompt: string
-  white_gc_interval_days: number
 }
 
 export interface UpdateGroupMgrConfigReq {
   enabled: boolean
   llm_review: boolean
   black_min_score: number
-  white_min_score: number
   llm_batch_window: number
   img_spam_window: number
   img_spam_threshold: number
@@ -519,7 +519,6 @@ export interface UpdateGroupMgrConfigReq {
   llm_criteria: string
   llm_gray_prompt: string
   llm_high_risk_prompt: string
-  white_gc_interval_days: number
 }
 export interface GroupMgrWordResp { id: number; word: string; category: string; source: string; rag_synced: boolean; rag_tag: string }
 export interface GroupMgrSampleResp {
@@ -536,6 +535,32 @@ export interface GroupMgrSampleResp {
   created_at: string
 }
 export interface GroupMgrViolationResp { id: number; group_id: number; user_id: number; username: string; count: number; detection_path: string; llm_reason: string }
+export interface JoinReviewRequestItem {
+  id: number
+  group_id: number
+  user_id: number
+  username: string
+  comment: string
+  created_at: string
+}
+export interface JoinReviewRecordItem {
+  id: number
+  group_id: number
+  user_id: number
+  username: string
+  comment: string
+  verdict: 'approve' | 'reject'
+  reviewer: 'ai' | 'manual'
+  reason: string
+  reviewed_at: string
+}
+export interface JoinReviewRecordListResp { total: number; list: JoinReviewRecordItem[] }
+export interface JoinReviewConfig {
+  enabled_groups: number[]
+  prompts: Record<string, string>
+  batch_size: number
+  flush_seconds: number
+}
 export interface GroupMgrStatsResp {
   group_id: number
   date: string
@@ -555,8 +580,6 @@ export interface GroupMgrTestResp {
   rag_ok: boolean
   black_score: number | null
   black_phrase: string
-  white_score: number | null
-  white_phrase: string
   verdict: string
   reason: string
 }
@@ -577,12 +600,12 @@ export const groupMgrApi = {
   syncRAG: () => client.post('/group-mgr/sync-rag'),
   samples: (listType?: string) => client.get('/group-mgr/samples', { params: { list_type: listType } }),
   deleteSample: (id: number) => client.delete(`/group-mgr/samples/${id}`),
-  addPhrase: (text: string, listType: string, category?: string) =>
-    client.post('/group-mgr/phrases', { text, list_type: listType, category }),
-  importPhrases: (file: File, listType: string, category?: string) => {
+  addPhrase: (text: string, category?: string) =>
+    client.post('/group-mgr/phrases', { text, list_type: 'black', category }),
+  importPhrases: (file: File, category?: string) => {
     const form = new FormData()
     form.append('file', file)
-    return client.post(`/group-mgr/phrases/import?list_type=${listType}&category=${category ?? 'ad'}`, form, {
+    return client.post(`/group-mgr/phrases/import?list_type=black&category=${category ?? 'ad'}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
@@ -595,4 +618,12 @@ export const groupMgrApi = {
   syncAdminsFromAdapter: () => client.post('/group-mgr/admins/sync-from-adapter'),
   stats: (group_id: number) => client.get('/group-mgr/stats', { params: { group_id } }),
   test: (text: string) => client.post('/group-mgr/test', { text }),
+  // ----- 加群审核（AI 攒批审核） -----
+  joinReviewRequests: () => client.get('/group-mgr/join-review/requests'),
+  reviewJoinRequest: (id: number, approve: boolean, reason?: string) =>
+    client.post(`/group-mgr/join-review/requests/${id}/decision`, { approve, reason: reason ?? '' }),
+  joinReviewRecords: (page = 1, pageSize = 15) =>
+    client.get('/group-mgr/join-review/records', { params: { page, page_size: pageSize } }),
+  joinReviewConfig: () => client.get('/group-mgr/join-review/config'),
+  updateJoinReviewConfig: (data: JoinReviewConfig) => client.put('/group-mgr/join-review/config', data),
 }

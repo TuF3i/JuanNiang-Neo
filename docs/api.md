@@ -981,7 +981,7 @@ Plugin 与 Agent 发送消息时，用 `[CQ:image,file=imgs://<id>]` 引用图�
 
 ### GET /group-mgr/config
 
-群管理配置。**data** `GroupMgrConfigResp`: `enabled`、`llm_review`、`black_min_score`（黑名单语录命中阈值，默认 0.7）、`white_min_score`（白名单语录命中阈值，默认 0.75）、`llm_batch_window`（LLM 判定批窗口秒数，默认 3）、`exclude_groups`（排除检测的群 ID 列表）、`llm_prompt`（统一检测提示词）、`white_gc_interval_days`（白名单语录 GC 周期天，默认 7）。旧字段 `high_score`/`low_score`/`fallback_score`/`llm_criteria`/`llm_gray_prompt`/`llm_high_risk_prompt` 已废弃（保留兼容）。
+群管理配置。**data** `GroupMgrConfigResp`: `enabled`、`llm_review`、`black_min_score`（黑名单语录命中阈值，默认 0.7）、`llm_batch_window`（LLM 判定批窗口秒数，默认 3）、`exclude_groups`（排除检测的群 ID 列表）、`llm_prompt`（统一检测提示词）。旧字段 `high_score`/`low_score`/`fallback_score`/`llm_criteria`/`llm_gray_prompt`/`llm_high_risk_prompt`/`white_min_score`/`white_gc_interval_days` 已废弃（白名单语录体系已剔除，列保留兼容不再使用）。
 
 ### PUT /group-mgr/config
 
@@ -1011,17 +1011,17 @@ Plugin 与 Agent 发送消息时，用 `[CQ:image,file=imgs://<id>]` 引用图�
 
 SSE 流式同步进度（逐批推送 `data: {done, failed}`，结束推 `data: {total, failed}`；出错推 `error` 事件 `{error}`）。群管理未初始化返回普通 JSON 错误；RAG 未配置时流内推送 `error` 事件（前端按 `data.error` 中断）。
 
-### GET /group-mgr/samples?list_type=
+### GET /group-mgr/samples
 
-违禁语录列表（`list_type` 可选 black/white，缺省全部）。**data** `GroupMgrSampleResp[]`: `id`、`word_id`、`list_type`（black/white）、`text`、`category`、`source`（seed/learn/import）、`hit_count`、`rag_synced`（已同步到 RAG 向量库）、`rag_tag`（派生 RAG tag UUID，black=`ragtag.Sample(id)` / white=`ragtag.WhitePhrase(id)`）、`last_used_at`（最近命中时间，GC 用）、`created_at`。
+黑名单违禁语录列表（白名单语录体系已剔除，仅返回黑名单；存量 white 行不展示）。**data** `GroupMgrSampleResp[]`: `id`、`word_id`、`list_type`（恒 black）、`text`、`category`、`source`（seed/learn/import）、`hit_count`、`rag_synced`（已同步到 RAG 向量库）、`rag_tag`（派生 RAG tag UUID，`ragtag.Sample(id)`）、`last_used_at`（最近命中时间）、`created_at`。
 
 ### POST /group-mgr/phrases
 
-新增违禁语录。**Body** `{text string, list_type string(black/white), category string(可选 ad/sensitive)}`。RAG 可用时同步写向量库并标记 `rag_synced=true`，不可用仅存库（可手动同步）。**data** `null`。
+新增黑名单违禁语录。**Body** `{text string, list_type string(仅 black，缺省 black), category string(可选 ad/sensitive)}`。RAG 可用时同步写向量库并标记 `rag_synced=true`，不可用仅存库（可手动同步）。**data** `null`。
 
 ### POST /group-mgr/phrases/import?list_type=
 
-txt 导入违禁语录（multipart `file`，一行一个，≤1MB/≤20000 行；`?list_type=` 指定集合，`?category=` 可选 ad/sensitive，默认 ad）。**data** `{imported int, skipped int}`。
+txt 导入黑名单违禁语录（multipart `file`，一行一个，≤1MB/≤20000 行；`?list_type=black` 必填，`?category=` 可选 ad/sensitive，默认 ad）。**data** `{imported int, skipped int}`。
 
 ### DELETE /group-mgr/samples/:id
 
@@ -1053,7 +1053,7 @@ txt 导入违禁语录（multipart `file`，一行一个，≤1MB/≤20000 行�
 统计（与 /groupstats 命令同源）。**data** `GroupMgrStatsResp`: `group_id`、`date`、`join_today`、`warns`、`mutes`、`copy_warns`、`ad`、`sensitive`、`kicks`。
 
 ### POST /group-mgr/test
-链路测试（不处罚、不写库）。**Body** `{text string}`。**data** `GroupMgrTestResp`: `text`、`card`、`word`、`word_cat`、`rag_ok`、`black_score`、`black_phrase`、`white_score`、`white_phrase`、`verdict`（punish/review/pass）、`reason`。
+链路测试（不处罚、不写库）。**Body** `{text string}`。**data** `GroupMgrTestResp`: `text`、`card`、`word`、`word_cat`、`rag_ok`、`black_score`、`black_phrase`、`verdict`（punish/review/pass）、`reason`。
 
 ### POST /memory/sync-rag
 

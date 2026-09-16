@@ -15,6 +15,7 @@ import (
 	"JuanNiang-Neo/internal/adapter"
 	"JuanNiang-Neo/internal/agent/cronjob"
 	"JuanNiang-Neo/internal/agent/groupmgr"
+	"JuanNiang-Neo/internal/agent/joinreview"
 	"JuanNiang-Neo/internal/agent/mcp"
 	"JuanNiang-Neo/internal/agent/memory"
 	"JuanNiang-Neo/internal/agent/memory/longterm"
@@ -63,8 +64,9 @@ type HagoCenter struct {
 	CronJobManager *cronjob.Manager
 	CronJobEvents  chan adapter.Event // CronJob → 主 Agent 事件循环
 	PluginEngine   *pluggin.PluginEngine
-	GroupMgr       *groupmgr.Manager // 群管理系统功能（Phase 0.5 检测闸门）
-	Loops          *LoopTracker      // 当前活跃的 Agent ReAct 循环（监控展示）
+	GroupMgr       *groupmgr.Manager   // 群管理系统功能（Phase 0.5 检测闸门）
+	JoinReview     *joinreview.Manager // 加群请求 AI 攒批审核（Phase 0.6 接管生效群的加群请求）
+	Loops          *LoopTracker        // 当前活跃的 Agent ReAct 循环（监控展示）
 
 	// Stats 群消息 / Agent 回复统计事件写入器（Loki+Promtail 专用通道，独立于主日志 pipeline）。
 	// nil = 未启用（配置关闭时）；Emit 调用方需判 nil。

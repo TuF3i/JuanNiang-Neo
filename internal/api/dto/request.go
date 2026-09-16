@@ -84,6 +84,14 @@ type AddProviderReq struct {
 // UpdateProviderReq 与 AddProviderReq 结构完全一致（覆盖更新），用类型别名复用避免重复维护。
 type UpdateProviderReq = AddProviderReq
 
+// ListProviderModelsReq 拉取厂商模型列表（后端代理 GET {endpoint}/models，绕开浏览器 CORS）。
+type ListProviderModelsReq struct {
+	Endpoint   string `json:"endpoint"`
+	Token      string `json:"token"`
+	AuthHeader string `json:"auth_header"` // bearer / x-api-key / api-key / 空
+	APIMode    string `json:"api_mode"`    // gemini_native 时 token 走 query 参数 key
+}
+
 type ToggleProviderReq struct {
 	IsActive bool `json:"is_active"`
 }
@@ -369,7 +377,6 @@ type UpdateGroupMgrConfigReq struct {
 	Enabled              bool     `json:"enabled"`
 	LLMReview            bool     `json:"llm_review"`
 	BlackMinScore        float64  `json:"black_min_score"`
-	WhiteMinScore        float64  `json:"white_min_score"`
 	LLMBatchWindow       int      `json:"llm_batch_window"`
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
@@ -382,16 +389,27 @@ type UpdateGroupMgrConfigReq struct {
 	LLMCriteria          string   `json:"llm_criteria"`
 	LLMGrayPrompt        string   `json:"llm_gray_prompt"`
 	LLMHighRiskPrompt    string   `json:"llm_high_risk_prompt"`
-
-	// WhiteGCIntervalDays 白名单语录 GC 周期（天），默认 7
-	WhiteGCIntervalDays int `json:"white_gc_interval_days"`
 }
 
-// AddGroupMgrPhraseReq 新增违禁语录（黑/白名单）。
+// UpdateJoinReviewConfigReq 更新加群审核配置（生效群 / 每群提示词 / 攒批阈值 / 触发窗口）。
+type UpdateJoinReviewConfigReq struct {
+	EnabledGroups []int64           `json:"enabled_groups"`
+	Prompts       map[string]string `json:"prompts"`
+	BatchSize     int               `json:"batch_size"`
+	FlushSeconds  int               `json:"flush_seconds"`
+}
+
+// JoinReviewDecisionReq 人工审核加群请求（通过/拒绝，拒绝理由随动作发送给申请者）。
+type JoinReviewDecisionReq struct {
+	Approve bool   `json:"approve"`
+	Reason  string `json:"reason"`
+}
+
+// AddGroupMgrPhraseReq 新增黑名单违禁语录（白名单语录体系已剔除）。
 type AddGroupMgrPhraseReq struct {
 	Text     string `json:"text"`
-	Category string `json:"category"`  // black 语录：ad / sensitive；white 语录忽略
-	ListType string `json:"list_type"` // black / white
+	Category string `json:"category"`  // ad / sensitive
+	ListType string `json:"list_type"` // 仅 black（兼容旧前端传参）
 }
 
 // AddGroupMgrWordReq 新增词条（已废弃：关键词仅作兜底不可修改，保留兼容）。

@@ -23,8 +23,8 @@ func TestExtractJSON(t *testing.T) {
 		},
 		{
 			name:  "markdown 无语言标识代码块",
-			input: "```\n{\"results\":[{\"index\":0,\"verdict\":\"white\",\"reason\":\"正常\"}]}\n```",
-			want:  `{"results":[{"index":0,"verdict":"white","reason":"正常"}]}`,
+			input: "```\n{\"results\":[{\"index\":0,\"verdict\":\"none\",\"category\":\"none\",\"reason\":\"正常\"}]}\n```",
+			want:  `{"results":[{"index":0,"verdict":"none","category":"none","reason":"正常"}]}`,
 		},
 		{
 			name:  "前后有解释文本",
@@ -49,7 +49,7 @@ func TestExtractJSON(t *testing.T) {
 			if len(bat.Results) != 1 {
 				t.Fatalf("应解析出 1 条结果，got %d", len(bat.Results))
 			}
-			if bat.Results[0].Verdict != "black" && bat.Results[0].Verdict != "white" && bat.Results[0].Verdict != "none" {
+			if bat.Results[0].Verdict != "black" && bat.Results[0].Verdict != "none" {
 				t.Fatalf("verdict 非法: %q", bat.Results[0].Verdict)
 			}
 		})

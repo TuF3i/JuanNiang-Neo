@@ -15,9 +15,92 @@ const now = () => new Date().toISOString()
 
 // --- Providers ---
 let providers = [
-  { id: UUID(), created_at: now(), name: 'OpenAI GPT-4o', type: 'text_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'gpt-4o', temperature: 0.7, is_active: true },
-  { id: UUID(), created_at: now(), name: 'DALL-E 3', type: 'image_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'dall-e-3', temperature: 0, is_active: true },
-  { id: UUID(), created_at: now(), name: 'OpenAI Embedding', type: 'embedding_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'text-embedding-3-small', temperature: 0, is_active: false },
+  { id: UUID(), created_at: now(), name: 'OpenAI GPT-4o', type: 'text_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'gpt-4o', temperature: 0.7, is_active: true, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+  { id: UUID(), created_at: now(), name: 'DALL-E 3', type: 'image_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'dall-e-3', temperature: 0, is_active: true, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+  { id: UUID(), created_at: now(), name: 'OpenAI Embedding', type: 'embedding_model', endpoint: 'https://api.openai.com/v1', token: 'sk-***', model: 'text-embedding-3-small', temperature: 0, is_active: false, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off', thinking_budget: 0, max_tokens: 0, top_p: null, top_k: null, frequency_penalty: null, presence_penalty: null, repetition_penalty: null, provider_key: '', auth_header: '', url_mode: 'auto' },
+]
+
+// --- Provider 厂商预设（与后端 internal/agent/provider/provider_presets.go 对齐） ---
+const providerPresets = [
+  {
+    key: 'deepseek', name: 'DeepSeek',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.deepseek.com', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.deepseek.com/anthropic', auth_header: 'x-api-key' },
+      { api_mode: 'openai_responses', base_url: 'https://api.deepseek.com', auth_header: 'bearer', note: '仅 deepseek-v4-flash 支持；无后续状态（previous_response_id/store 不支持）' },
+    ],
+  },
+  {
+    key: 'zhipu', name: '智谱 Z.AI',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://open.bigmodel.cn/api/paas/v4', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://open.bigmodel.cn/api/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'kimi', name: 'Moonshot Kimi',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.moonshot.cn/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.moonshot.cn/anthropic', auth_header: 'bearer' },
+    ],
+  },
+  {
+    key: 'alibaba', name: '阿里百炼',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://dashscope.aliyuncs.com/apps/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'volcengine', name: '火山方舟',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://ark.cn-beijing.volces.com/api/v3', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://ark.cn-beijing.volces.com/api/v3/anthropic', auth_header: 'bearer', note: '需 Coding Plan 订阅' },
+      { api_mode: 'openai_responses', base_url: 'https://ark.cn-beijing.volces.com/api/v3', auth_header: 'bearer', note: '250615+ 新版模型默认支持（doubao-1-5-pro-32k-character-250715 例外）' },
+    ],
+  },
+  {
+    key: 'minimax', name: 'MiniMax',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.minimaxi.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.minimaxi.com/anthropic', auth_header: 'bearer', note: '仅 M 系列支持' },
+    ],
+  },
+  {
+    key: 'xiaomi', name: '小米 MiMo',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.xiaomimimo.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.xiaomimimo.com/anthropic', auth_header: 'api-key' },
+    ],
+  },
+  {
+    key: 'stepfun', name: '阶跃星辰',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.stepfun.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.stepfun.com/step_plan', auth_header: 'bearer', note: '需 Step Plan 订阅' },
+    ],
+  },
+  {
+    key: 'tencent', name: '腾讯混元',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.hunyuan.cloud.tencent.com/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.hunyuan.cloud.tencent.com/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'baidu', name: '百度千帆',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://qianfan.baidubce.com/v2', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://qianfan.baidubce.com/anthropic', auth_header: 'x-api-key' },
+    ],
+  },
+  {
+    key: 'siliconflow', name: '硅基流动',
+    protocols: [
+      { api_mode: 'chat_completions', base_url: 'https://api.siliconflow.cn/v1', auth_header: 'bearer' },
+      { api_mode: 'anthropic_messages', base_url: 'https://api.siliconflow.cn/v1', auth_header: 'bearer' },
+    ],
+  },
 ]
 
 // --- MCP Servers ---
@@ -74,7 +157,6 @@ let groupMgrDefaultConfig = {
   enabled: true,
   llm_review: true,
   black_min_score: 0.7,
-  white_min_score: 0.75,
   llm_batch_window: 3,
   img_spam_window: 2,
   img_spam_threshold: 3,
@@ -87,7 +169,6 @@ let groupMgrDefaultConfig = {
   llm_criteria: '',
   llm_gray_prompt: '',
   llm_high_risk_prompt: '',
-  white_gc_interval_days: 7,
 }
 let groupMgrConfig: any = null
 let groupMgrWordSeed = 100
@@ -102,8 +183,7 @@ let groupMgrSampleSeed = 100
 let groupMgrSamples = [
   { id: 1, word_id: 0, list_type: 'black', text: '办卡加群办套餐，低价流量卡', category: 'ad', source: 'learn', hit_count: 3, rag_synced: true, rag_tag: '3af2b489-b13a-42e4-af98-fe89d0e6b011', last_used_at: now(), created_at: now() },
   { id: 2, word_id: 0, list_type: 'black', text: '0元购送福利，加我微信领流量卡', category: 'ad', source: 'seed', hit_count: 1, rag_synced: true, rag_tag: '3af2b489-b13a-42e4-af98-fe89d0e6b012', last_used_at: null, created_at: now() },
-  { id: 3, word_id: 0, list_type: 'white', text: '明天一起食堂吃饭吗', category: 'ok', source: 'seed', hit_count: 5, rag_synced: true, rag_tag: '3af2b489-b13a-42e4-af98-fe89d0e6b013', last_used_at: now(), created_at: now() },
-  { id: 4, word_id: 0, list_type: 'white', text: '周末去爬山吗，新版本出了', category: 'ok', source: 'learn', hit_count: 0, rag_synced: false, rag_tag: '', last_used_at: null, created_at: now() },
+  { id: 3, word_id: 0, list_type: 'black', text: '加我微信，专业办卡提额', category: 'ad', source: 'learn', hit_count: 2, rag_synced: false, rag_tag: '', last_used_at: null, created_at: now() },
 ]
 let groupMgrViolations = [
   { id: 1, group_id: 10001, user_id: 20001, username: '张三', count: 1, detection_path: 'rag', llm_reason: '' },
@@ -112,6 +192,38 @@ let groupMgrViolations = [
 ]
 let groupMgrWhitelist: number[] = [30001]
 let groupMgrAdmins: number[] = [30002]
+
+// --- 加群审核（AI 攒批审核） ---
+// 群号对齐 chatAreas mock 里的群聊 target_id（555666777 / 888999000），保证设置弹窗群选择器可选
+const joinReviewAgo = (sec: number) => new Date(Date.now() - sec * 1000).toISOString()
+let joinReviewRequestSeed = 100
+let joinReviewRequests = [
+  { id: 1, group_id: 555666777, user_id: 21001, username: '小张', comment: '群里同学推荐来的', created_at: joinReviewAgo(35) },
+  { id: 2, group_id: 555666777, user_id: 21002, username: '广告哥', comment: '办校园卡加微信XXX，低价流量卡', created_at: joinReviewAgo(70) },
+  { id: 3, group_id: 888999000, user_id: 21003, username: '新生小李', comment: '', created_at: joinReviewAgo(130) },
+  { id: 4, group_id: 555666777, user_id: 21004, username: '考研人', comment: '想了解考研交流群', created_at: joinReviewAgo(300) },
+  { id: 5, group_id: 888999000, user_id: 21005, username: '路人甲', comment: '随便看看', created_at: joinReviewAgo(600) },
+]
+let joinReviewRecordSeed = 100
+let joinReviewRecords = [
+  { id: 1, group_id: 555666777, user_id: 21011, username: '小陈', comment: '学长拉我进来的', verdict: 'approve', reviewer: 'ai', reason: '留言正常，无风险信号，建议通过', reviewed_at: joinReviewAgo(1800) },
+  { id: 2, group_id: 555666777, user_id: 21012, username: '兼职代理', comment: '招兼职代理日结300', verdict: 'reject', reviewer: 'ai', reason: '留言含「招兼职代理」推广话术，命中广告特征，建议拒绝', reviewed_at: joinReviewAgo(1810) },
+  { id: 3, group_id: 888999000, user_id: 21013, username: '老王', comment: '朋友推荐', verdict: 'approve', reviewer: 'manual', reason: '管理员手动通过', reviewed_at: joinReviewAgo(3600) },
+  { id: 4, group_id: 555666777, user_id: 21014, username: '神秘人', comment: '', verdict: 'reject', reviewer: 'manual', reason: '昵称含违规词汇，手动拒绝', reviewed_at: joinReviewAgo(7200) },
+  { id: 5, group_id: 555666777, user_id: 21015, username: '阿强', comment: '想学前端', verdict: 'approve', reviewer: 'ai', reason: '诉求为技术交流，无风险', reviewed_at: joinReviewAgo(9000) },
+  { id: 6, group_id: 888999000, user_id: 21016, username: '贷款哥', comment: '大学生小额贷款秒批', verdict: 'reject', reviewer: 'ai', reason: '留言为贷款推广，命中敏感类目，建议拒绝', reviewed_at: joinReviewAgo(14400) },
+  { id: 7, group_id: 888999000, user_id: 21017, username: '小刘', comment: '重邮新生', verdict: 'approve', reviewer: 'ai', reason: '自我介绍正常，无风险信号', reviewed_at: joinReviewAgo(28800) },
+  { id: 8, group_id: 555666777, user_id: 21018, username: '跑腿小哥', comment: '校园跑腿接单', verdict: 'approve', reviewer: 'manual', reason: '', reviewed_at: joinReviewAgo(43200) },
+]
+let joinReviewConfig = {
+  enabled_groups: [555666777, 888999000],
+  prompts: {
+    555666777: '这是红岩网校工作站招新群，主要面向重邮对前端/后端/运维感兴趣的新生。',
+    888999000: '',
+  } as Record<string, string>,
+  batch_size: 5,
+  flush_seconds: 60,
+}
 
 // --- 知识库 ---
 let knowledgeItems = [
@@ -269,6 +381,23 @@ export const mockHandlers: MockHandler[] = [
     handler() { return ok(providers) }
   },
   {
+    // 厂商协议预设（照抄后端 internal/agent/provider/provider_presets.go）
+    method: 'GET', path: '/providers/presets',
+    handler() { return ok(providerPresets) }
+  },
+  {
+    // 测试连接（不落库）：mock 恒成功
+    method: 'POST', path: '/providers/test',
+    handler() { return ok({ ok: true, message: 'mock 环境：连接测试通过' }) }
+  },
+  {
+    // 模型列表代理：mock 返回固定示例列表
+    method: 'POST', path: '/providers/models',
+    handler() {
+      return ok({ ok: true, message: '已获取 6 个模型', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini', 'gpt-4o-audio-preview', 'chatgpt-4o-latest'] })
+    }
+  },
+  {
     method: 'GET', path: '/providers/:id',
     handler({ params }) {
       const p = providers.find((p) => p.id === params.id)
@@ -281,7 +410,7 @@ export const mockHandlers: MockHandler[] = [
       if (body.isActive) {
         providers.forEach((p) => { if (p.type === body.type) p.is_active = false })
       }
-      const p = { id: UUID(), created_at: now(), name: body.name, type: body.type, endpoint: body.endpoint, token: body.token, model: body.model, temperature: body.temperature ?? 0.7, is_active: body.isActive }
+      const p = { id: UUID(), created_at: now(), ...body }
       providers.push(p)
       return ok(p)
     }
@@ -835,10 +964,9 @@ export const mockHandlers: MockHandler[] = [
   },
   {
     method: 'GET', path: '/group-mgr/samples',
-    handler({ query }) {
-      if (query.list_type === 'white') return ok(groupMgrSamples.filter((s) => s.list_type === 'white'))
-      if (query.list_type === 'black') return ok(groupMgrSamples.filter((s) => s.list_type !== 'white'))
-      return ok(groupMgrSamples)
+    handler() {
+      // 白名单语录体系已剔除：只返回黑名单
+      return ok(groupMgrSamples.filter((s) => s.list_type !== 'white'))
     }
   },
   {
@@ -851,11 +979,10 @@ export const mockHandlers: MockHandler[] = [
   {
     method: 'POST', path: '/group-mgr/phrases',
     handler({ body }) {
-      const listType = body.list_type === 'white' ? 'white' : 'black'
       const s = {
         id: ++groupMgrSampleSeed,
         word_id: 0,
-        list_type: listType,
+        list_type: 'black',
         text: String(body.text || ''),
         category: body.category === 'sensitive' ? 'sensitive' : 'ad',
         source: 'import',
@@ -872,11 +999,10 @@ export const mockHandlers: MockHandler[] = [
   {
     method: 'POST', path: '/group-mgr/phrases/import',
     handler({ query }) {
-      const listType = query.list_type === 'white' ? 'white' : 'black'
       const lines = ['新导入语录A', '新导入语录B', '新导入语录C']
       for (const t of lines) {
         groupMgrSamples.push({
-          id: ++groupMgrSampleSeed, word_id: 0, list_type: listType, text: t,
+          id: ++groupMgrSampleSeed, word_id: 0, list_type: 'black', text: t,
           category: 'ad', source: 'import', hit_count: 0,
           rag_synced: ragHealthy, rag_tag: ragHealthy ? UUID() : '',
           last_used_at: null, created_at: now(),
@@ -935,21 +1061,16 @@ export const mockHandlers: MockHandler[] = [
       const text = String(body.text || '')
       const keyword = ['卡', '群', '微信', '流量', '兼职', '贷款'].some((k) => text.includes(k))
       const hardSignal = keyword || text.includes('com.tencent.troopsharecard')
-      // 黑白双集合判定：仿真实链路
+      // 黑名单判定：仿真实链路
       const blackPhrase = ['办卡', '流量卡', '0元购', '加微信'].find((p) => text.includes(p))
-      const whitePhrase = ['食堂', '明天', '爬山'].find((p) => text.includes(p))
       const blackScore = blackPhrase ? 0.88 : null
-      const whiteScore = whitePhrase ? 0.82 : null
       let verdict = 'pass', reason = ''
       if (ragHealthy && (blackScore ?? 0) >= (groupMgrConfig?.black_min_score ?? 0.7)) {
         verdict = 'punish'
         reason = `RAG 黑名单命中（分数 ${blackScore} ≥ ${groupMgrConfig?.black_min_score ?? 0.7}）→ 直接处罚`
-      } else if (ragHealthy && (whiteScore ?? 0) >= (groupMgrConfig?.white_min_score ?? 0.75)) {
-        verdict = 'pass'
-        reason = `RAG 白名单命中（分数 ${whiteScore} ≥ ${groupMgrConfig?.white_min_score ?? 0.75}）→ 放行`
       } else if (ragHealthy) {
         verdict = 'review'
-        reason = '未命中黑白名单 → LLM 统一判定（3s 批窗口，逐条独立）'
+        reason = '未命中黑名单 → LLM 统一判定（3s 批窗口，逐条独立）'
       } else if (hardSignal) {
         verdict = 'review'
         reason = 'RAG 不可用 → 关键词兜底（高危复核）'
@@ -965,11 +1086,62 @@ export const mockHandlers: MockHandler[] = [
         rag_ok: ragHealthy,
         black_score: blackScore,
         black_phrase: blackPhrase ?? '',
-        white_score: whiteScore,
-        white_phrase: whitePhrase ?? '',
         verdict,
         reason,
       })
+    }
+  },
+
+  // ============ 加群审核（AI 攒批审核） ============
+  {
+    method: 'GET', path: '/group-mgr/join-review/requests',
+    handler() { return ok(joinReviewRequests) }
+  },
+  {
+    method: 'POST', path: '/group-mgr/join-review/requests/:id/decision',
+    handler({ body, params }) {
+      const id = Number(params.id)
+      const idx = joinReviewRequests.findIndex((r) => r.id === id)
+      if (idx < 0) return err(40400, '请求不存在或已被处理')
+      const req = joinReviewRequests[idx]
+      joinReviewRequests.splice(idx, 1)
+      joinReviewRecords.unshift({
+        id: ++joinReviewRecordSeed,
+        group_id: req.group_id,
+        user_id: req.user_id,
+        username: req.username,
+        comment: req.comment,
+        verdict: body?.approve ? 'approve' : 'reject',
+        reviewer: 'manual',
+        reason: String(body?.reason || (body?.approve ? '管理员手动通过' : '管理员手动拒绝')),
+        reviewed_at: now(),
+      })
+      return ok(null)
+    }
+  },
+  {
+    method: 'GET', path: '/group-mgr/join-review/records',
+    handler({ query }) {
+      const page = Math.max(1, Number(query.page) || 1)
+      const pageSize = Math.min(100, Math.max(1, Number(query.page_size) || 15))
+      const start = (page - 1) * pageSize
+      return ok({ total: joinReviewRecords.length, list: joinReviewRecords.slice(start, start + pageSize) })
+    }
+  },
+  {
+    method: 'GET', path: '/group-mgr/join-review/config',
+    handler() { return ok(joinReviewConfig) }
+  },
+  {
+    method: 'PUT', path: '/group-mgr/join-review/config',
+    handler({ body }) {
+      joinReviewConfig = {
+        enabled_groups: (body?.enabled_groups || []).map(Number),
+        prompts: body?.prompts || {},
+        batch_size: Number(body?.batch_size) || 5,
+        flush_seconds: Number(body?.flush_seconds) || 60,
+      }
+      return ok(joinReviewConfig)
     }
   },
 

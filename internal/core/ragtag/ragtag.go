@@ -45,9 +45,3 @@ func Word(itemID string) uuid.UUID {
 func Sample(itemID string) uuid.UUID {
 	return uuid.NewSHA1(ragNS, []byte("s:"+itemID))
 }
-
-// WhitePhrase 返回白名单语录的 RAG tag（与黑名单样本 s: 前缀区分，
-// 检索命中后按前缀归类黑白集合）。
-func WhitePhrase(itemID string) uuid.UUID {
-	return uuid.NewSHA1(ragNS, []byte("wt:"+itemID))
-}

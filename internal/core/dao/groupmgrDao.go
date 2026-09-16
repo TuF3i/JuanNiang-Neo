@@ -30,7 +30,6 @@ func (d *GroupMgrDAO) InitConfig(ctx context.Context) error {
 	return d.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&models.GroupMgrConfig{
 		ID:                   1,
 		BlackMinScore:        0.7,
-		WhiteMinScore:        0.75,
 		LLMBatchWindow:       3,
 		ImgSpamWindow:        2,
 		ImgSpamThreshold:     3,

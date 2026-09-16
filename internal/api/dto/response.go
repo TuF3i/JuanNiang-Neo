@@ -58,6 +58,7 @@ var (
 	T2IStyleInvalid         = Response{Status: 40049, Info: "T2I 渲染风格无效（仅允许空、random 或风格库中定义的风格名）"}
 	StickerTagSystem        = Response{Status: 40047, Info: "系统内置标签不可删除"}
 	WordImportTooLarge      = Response{Status: 40051, Info: "词库导入文件过大（≤1MB）或行数超限（≤20000）"}
+	JoinRequestNotExist     = Response{Status: 40052, Info: "加群请求不存在或已被处理"}
 )
 
 type TokenResp struct {
@@ -129,6 +130,13 @@ type ProviderProtocolResp struct {
 type TestProviderResp struct {
 	Ok      bool   `json:"ok"`
 	Message string `json:"message"` // 成功=模型回复；失败=错误详情
+}
+
+// ProviderModelsResp 厂商模型列表拉取结果（后端代理，绕开浏览器 CORS）。
+type ProviderModelsResp struct {
+	Ok      bool     `json:"ok"`
+	Message string   `json:"message"` // 成功=数量说明；失败=错误详情
+	Models  []string `json:"models"`
 }
 
 type MCPServerResp struct {
@@ -497,7 +505,6 @@ type GroupMgrConfigResp struct {
 	Enabled              bool     `json:"enabled"`
 	LLMReview            bool     `json:"llm_review"`
 	BlackMinScore        float64  `json:"black_min_score"`  // 黑名单语录命中阈值
-	WhiteMinScore        float64  `json:"white_min_score"`  // 白名单语录命中阈值
 	LLMBatchWindow       int      `json:"llm_batch_window"` // LLM 判定批窗口（秒）
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
@@ -510,9 +517,6 @@ type GroupMgrConfigResp struct {
 	LLMCriteria          string   `json:"llm_criteria"` // 已废弃（兼容）
 	LLMGrayPrompt        string   `json:"llm_gray_prompt"`
 	LLMHighRiskPrompt    string   `json:"llm_high_risk_prompt"`
-
-	// WhiteGCIntervalDays 白名单语录 GC 周期（天），默认 7
-	WhiteGCIntervalDays int `json:"white_gc_interval_days"`
 }
 
 // GroupMgrWordResp 词条。
@@ -529,7 +533,7 @@ type GroupMgrWordResp struct {
 type GroupMgrSampleResp struct {
 	ID         uint    `json:"id"`
 	WordID     uint    `json:"word_id"`   // 关联词条 ID（0=非词条派生样本）
-	ListType   string  `json:"list_type"` // black / white
+	ListType   string  `json:"list_type"` // black（white 已废弃，不再返回）
 	Text       string  `json:"text"`
 	Category   string  `json:"category"`
 	Source     string  `json:"source"`
@@ -549,6 +553,43 @@ type GroupMgrViolationResp struct {
 	Count         int    `json:"count"`          // 当前违规等级
 	DetectionPath string `json:"detection_path"` // rag / keyword / llm
 	LLMReason     string `json:"llm_reason"`     // LLM 审核返回的 reason
+}
+
+// JoinReviewRequestResp 待审加群请求。
+type JoinReviewRequestResp struct {
+	ID        uint   `json:"id"`
+	GroupID   int64  `json:"group_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Comment   string `json:"comment"`
+	CreatedAt string `json:"created_at"`
+}
+
+// JoinReviewRecordResp 加群审核记录（AI 与人工统一）。
+type JoinReviewRecordResp struct {
+	ID         uint   `json:"id"`
+	GroupID    int64  `json:"group_id"`
+	UserID     int64  `json:"user_id"`
+	Username   string `json:"username"`
+	Comment    string `json:"comment"`
+	Verdict    string `json:"verdict"`  // approve / reject
+	Reviewer   string `json:"reviewer"` // ai / manual
+	Reason     string `json:"reason"`
+	ReviewedAt string `json:"reviewed_at"`
+}
+
+// JoinReviewRecordListResp 审核记录分页列表。
+type JoinReviewRecordListResp struct {
+	Total int64                  `json:"total"`
+	List  []JoinReviewRecordResp `json:"list"`
+}
+
+// JoinReviewConfigResp 加群审核配置。
+type JoinReviewConfigResp struct {
+	EnabledGroups []int64           `json:"enabled_groups"`
+	Prompts       map[string]string `json:"prompts"`
+	BatchSize     int               `json:"batch_size"`
+	FlushSeconds  int               `json:"flush_seconds"`
 }
 
 // GroupMgrQQListResp 白名单/管理员列表。

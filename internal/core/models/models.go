@@ -62,3 +62,63 @@ func (j *JSONSlice) Scan(value any) error {
 	}
 	return json.Unmarshal(b, j)
 }
+
+// Int64Slice 是 []int64 的 GORM 兼容类型（加群审核生效群列表等数值 ID 集合）。
+type Int64Slice []int64
+
+func (s Int64Slice) Value() (driver.Value, error) {
+	if s == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+func (s *Int64Slice) Scan(value any) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, s)
+}
+
+// StringMap 是 map[string]string 的 GORM 兼容类型（加群审核每群提示词，键为群号字符串）。
+type StringMap map[string]string
+
+func (m StringMap) Value() (driver.Value, error) {
+	if m == nil {
+		return "{}", nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+func (m *StringMap) Scan(value any) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, m)
+}

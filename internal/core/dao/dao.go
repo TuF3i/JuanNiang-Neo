@@ -61,6 +61,7 @@ type Bundle struct {
 	FishCalendar    *FishCalendarDAO
 	ScheduledMsg    *ScheduledMessageDAO
 	GroupMgr        *GroupMgrDAO
+	JoinReview      *JoinReviewDAO
 }
 
 func NewBundle(db *gorm.DB) *Bundle {
@@ -96,5 +97,6 @@ func NewBundle(db *gorm.DB) *Bundle {
 		FishCalendar:    NewFishCalendarDAO(db),
 		ScheduledMsg:    NewScheduledMessageDAO(db),
 		GroupMgr:        NewGroupMgrDAO(db),
+		JoinReview:      NewJoinReviewDAO(db),
 	}
 }

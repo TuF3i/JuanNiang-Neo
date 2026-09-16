@@ -33,6 +33,7 @@ func RegisterRoutes(h *server.Hertz, svc *service.Service) {
 	api.DELETE("/providers/:id", auth, svc.DeleteProvider)
 	api.PUT("/providers/:id/toggle", auth, svc.ToggleProvider)
 	api.POST("/providers/test", auth, svc.TestProvider)
+	api.POST("/providers/models", auth, svc.ListProviderModels)
 
 	// MCP
 	api.GET("/mcp", auth, svc.ListMCPServers)
@@ -229,4 +230,10 @@ func RegisterRoutes(h *server.Hertz, svc *service.Service) {
 	api.POST("/group-mgr/admins/sync-from-adapter", auth, svc.SyncGroupMgrAdminsFromAdapter)
 	api.GET("/group-mgr/stats", auth, svc.GetGroupMgrStats)
 	api.POST("/group-mgr/test", auth, svc.TestGroupMgr)
+	// 加群审核（AI 攒批审核，待审/记录/配置）
+	api.GET("/group-mgr/join-review/requests", auth, svc.ListJoinReviewRequests)
+	api.POST("/group-mgr/join-review/requests/:id/decision", auth, svc.DecideJoinReviewRequest)
+	api.GET("/group-mgr/join-review/records", auth, svc.ListJoinReviewRecords)
+	api.GET("/group-mgr/join-review/config", auth, svc.GetJoinReviewConfig)
+	api.PUT("/group-mgr/join-review/config", auth, svc.UpdateJoinReviewConfig)
 }

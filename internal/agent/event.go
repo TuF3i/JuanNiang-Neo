@@ -143,7 +143,8 @@ func (h *HagoCenter) processEvent(ctx context.Context, ev adapter.Event) {
 	// Phase 0: 消息幂等去重。WS 断线重连/多连接时 OneBot 端可能重复推送同一条
 	// 消息（相同 message_id），重复消费会导致 Agent 重复执行任务与重复回复。
 	// 群/私聊的 message_id 各自独立递增，key 需带上 message_type。
-	if ev.PostType == "message" && ev.Message != nil && ev.Message.MessageID > 0 {
+	// message_id 只排除缺失的 0（部分实现的 ID 是随机 int32，可能为负值）。
+	if ev.PostType == "message" && ev.Message != nil && ev.Message.MessageID != 0 {
 		key := ev.Message.MessageType + ":" + strconv.FormatInt(ev.Message.MessageID, 10)
 		if h.msgDedup.SeenBefore(ctx, key) {
 			log.Info("重复消息已丢弃", "message_id", ev.Message.MessageID, "message_type", ev.Message.MessageType, "user_id", ev.Message.UserID)
@@ -171,6 +172,18 @@ func (h *HagoCenter) processEvent(ctx context.Context, ev adapter.Event) {
 	if h.GroupMgr != nil {
 		if h.GroupMgr.Process(ctx, ev) {
 			return
+		}
+	}
+	// Phase 0.6: 加群请求 AI 攒批审核（先于插件，Go 原生）。
+	// 命中审核生效群的申请入群请求（sub_type=add）由 JoinReview 接管并拦截，
+	// 不再派发给 Lua 插件，避免插件与 AI 审核双重处理；未生效群照旧透传插件。
+	// 仅在成功接管（落库并入队成功）时拦截：入队失败继续走插件兜底，不吞掉请求。
+	if h.JoinReview != nil && ev.PostType == "request" && ev.Request != nil &&
+		ev.Request.RequestType == "group" && ev.Request.SubType == "add" {
+		if h.JoinReview.Interested(ctx, ev.Request.GroupID) {
+			if h.JoinReview.Enqueue(ctx, ev) {
+				return
+			}
 		}
 	}
 	// Phase 1: Plugin 统一拦截
@@ -907,6 +920,12 @@ func (h *HagoCenter) handleMessage(ctx context.Context, events []adapter.Event, 
 	// 知识库检索注入：对话前模糊匹配，命中内容拼入系统提示词（LRU 加速）
 	if kc := h.buildKnowledgeContext(ctx, combinedUserMsg); kc != "" {
 		systemCtx += "\n\n" + kc
+	}
+
+	// OneBot11 实时上下文：拉取当前消息之前最近的 5 条聊天记录拼入系统提示词，
+	// 补齐短期记忆覆盖不到的语境（Bot 掉线/重启期间的发言、被过滤未入记忆的消息）
+	if obCtx := h.oneBotRecentContext(ctx, msg); obCtx != "" {
+		systemCtx += "\n\n" + obCtx
 	}
 
 	// ---------- 构建 Eino 消息列表 ----------
