@@ -104,13 +104,7 @@
                 />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-select
-                  v-if="isCustom"
-                  v-model="form.type"
-                  :items="types"
-                  label="类型"
-                />
-                <v-text-field v-else :model-value="'Text Model（预设）'" label="类型" readonly />
+                <v-select v-model="form.type" :items="types" label="类型" />
               </v-col>
             </v-row>
 
