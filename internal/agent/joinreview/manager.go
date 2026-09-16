@@ -45,6 +45,16 @@ type RequestExecutor interface {
 // ErrRequestBusy 请求正在审核中或已被处理（人工与 AI 抢占失败）。
 var ErrRequestBusy = errors.New("该请求正在审核中或已被处理")
 
+// onebotHandledMark OneBot 对「已被处理的请求再操作」的返回特征（retcode=100）：
+// 其他管理员已在 QQ 侧同意/拒绝后，机器人再执行即报此错。
+const onebotHandledMark = "retcode=100"
+
+// isRequestHandledErr 判断 OneBot 错误是否为「请求已被处理/失效」。
+// 此时该请求在 QQ 侧已是终态，机器人应丢弃待审行（面板列表不与 QQ 状态同步，此处弥补）。
+func isRequestHandledErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), onebotHandledMark)
+}
+
 // Manager 加群审核。
 type Manager struct {
 	dao       *dao.JoinReviewDAO
@@ -401,9 +411,18 @@ func (m *Manager) ManualDecide(ctx context.Context, id uint, approve bool, reaso
 // 三种裁决均落审核记录。返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
 func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, verdict, reviewer, reason string) error {
 	var execErr error
+	handled := false
 	if verdict == "approve" || verdict == "reject" {
 		execErr = m.adp.HandleGroupRequest(rec.Flag, rec.SubType, verdict == "approve", reason)
-		if execErr != nil {
+		switch {
+		case isRequestHandledErr(execErr):
+			// 其他管理员已在 QQ 侧同意/拒绝：请求已是终态，丢弃待审行
+			// （面板待审列表不与 QQ 侧状态同步，此处弥补）
+			handled = true
+			execErr = fmt.Errorf("该请求已被其他管理员在 QQ 侧处理，已自动丢弃待审行（%w）", execErr)
+			reason = execErr.Error()
+			log.Info("加群请求已被其他管理员处理，自动丢弃", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict)
+		case execErr != nil:
 			reason = fmt.Sprintf("【执行失败，请人工在 QQ 中处理】%s（错误：%v）", reason, execErr)
 			log.Warn("加群审核动作执行失败", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict, "err", execErr)
 		}
@@ -434,11 +453,13 @@ func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest
 		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
 			log.Error("转人工请求释放失败", "id", rec.ID, "err", err)
 		}
-	case execErr == nil:
+	case execErr == nil || handled:
+		// 执行成功，或请求已被其他管理员处理（已终态）→ 丢弃待审行
 		if err := m.dao.RequestDelete(ctx, rec.ID); err != nil {
 			log.Error("待审请求删除失败", "id", rec.ID, "err", err)
 		}
 	default:
+		// 真实执行失败（flag 过期等）：释放回 pending 保留可重试
 		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
 			log.Error("待审请求释放失败", "id", rec.ID, "err", err)
 		}
