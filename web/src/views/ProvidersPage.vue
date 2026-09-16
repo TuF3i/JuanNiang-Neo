@@ -39,8 +39,9 @@
             <v-col v-for="p in presets" :key="p.key" cols="6" sm="4">
               <v-card variant="outlined" hover class="preset-card rounded-lg" @click="choosePreset(p)">
                 <div class="d-flex align-center pa-4">
-                  <v-avatar :color="brandColor(p.key)" size="42" class="me-3">
-                    <span class="text-h6 font-weight-bold text-white">{{ avatarText(p.name) }}</span>
+                  <v-avatar :color="presetLogo(p.key) && !logoMono(p.key) ? undefined : brandColor(p.key)" size="42" class="me-3" :class="{ 'logo-mono-bg': presetLogo(p.key) && logoMono(p.key) }">
+                    <img v-if="presetLogo(p.key)" :src="presetLogo(p.key)" :alt="p.name" class="provider-logo" />
+                    <span v-else class="text-h6 font-weight-bold text-white">{{ avatarText(p.name) }}</span>
                   </v-avatar>
                   <div class="min-w-0">
                     <div class="text-subtitle-1 font-weight-bold text-truncate">{{ p.name }}</div>
@@ -75,6 +76,13 @@
     <v-dialog v-model="formDialog" max-width="860">
       <v-card rounded="lg">
         <v-card-title class="d-flex align-center py-4">
+          <img
+            v-if="formLogo"
+            :src="formLogo.src"
+            :alt="currentPreset?.name || form.provider_key"
+            class="provider-logo me-2"
+            :class="{ 'logo-mono-bg': logoMono(form.provider_key) }"
+          />
           <span class="me-auto text-truncate">
             {{ editing ? '编辑 Provider' : (isCustom ? '自定义 Provider' : `配置 ${currentPreset?.name ?? ''}`) }}
           </span>
@@ -263,6 +271,22 @@ import { ref, computed, onMounted } from 'vue'
 import { providerApi, providerPresetsApi, type ProviderResp, type ProviderPreset, type AddProviderReq, type TestProviderResp, type ProviderModelsResp } from '@/api'
 import { useToastStore } from '@/stores/toast'
 
+// 厂商 Logo（@lobehub/icons-static-svg 本地打包，无运行时 CDN 依赖）
+import deepseekLogo from '@lobehub/icons-static-svg/icons/deepseek-color.svg'
+import zhipuLogo from '@lobehub/icons-static-svg/icons/zhipu-color.svg'
+import kimiLogo from '@lobehub/icons-static-svg/icons/kimi-color.svg'
+import alibabaLogo from '@lobehub/icons-static-svg/icons/alibaba-color.svg'
+import volcengineLogo from '@lobehub/icons-static-svg/icons/volcengine-color.svg'
+import minimaxLogo from '@lobehub/icons-static-svg/icons/minimax-color.svg'
+import xiaomimimoLogo from '@lobehub/icons-static-svg/icons/xiaomimimo.svg'
+import stepfunLogo from '@lobehub/icons-static-svg/icons/stepfun-color.svg'
+import hunyuanLogo from '@lobehub/icons-static-svg/icons/hunyuan-color.svg'
+import baiduLogo from '@lobehub/icons-static-svg/icons/baidu-color.svg'
+import siliconcloudLogo from '@lobehub/icons-static-svg/icons/siliconcloud-color.svg'
+import openaiLogo from '@lobehub/icons-static-svg/icons/openai.svg'
+import claudeLogo from '@lobehub/icons-static-svg/icons/claude-color.svg'
+import geminiLogo from '@lobehub/icons-static-svg/icons/gemini-color.svg'
+
 const toastStore = useToastStore()
 const loading = ref(true)
 const items = ref<ProviderResp[]>([])
@@ -347,6 +371,26 @@ const brandColors: Record<string, string> = {
 const brandColor = (key: string) => brandColors[key] || '#607D8B'
 const avatarText = (name: string) => name.trim().charAt(0).toUpperCase() || '?'
 
+// provider_key → Logo（mono=单色 SVG，暗色主题下垫白色底避免不可见）
+const logoSrc: Record<string, { src: string; mono?: boolean }> = {
+  deepseek: { src: deepseekLogo },
+  zhipu: { src: zhipuLogo },
+  kimi: { src: kimiLogo },
+  alibaba: { src: alibabaLogo },
+  volcengine: { src: volcengineLogo },
+  minimax: { src: minimaxLogo },
+  xiaomi: { src: xiaomimimoLogo, mono: true },
+  stepfun: { src: stepfunLogo },
+  tencent: { src: hunyuanLogo },
+  baidu: { src: baiduLogo },
+  siliconflow: { src: siliconcloudLogo },
+  openai: { src: openaiLogo, mono: true },
+  anthropic: { src: claudeLogo },
+  gemini: { src: geminiLogo },
+}
+const presetLogo = (key: string) => logoSrc[key]?.src || ''
+const logoMono = (key: string) => !!logoSrc[key]?.mono
+
 // 各厂商常用模型（获取失败时的下拉候选，可手动输入任意值）
 const suggestModels: Record<string, string[]> = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
@@ -395,6 +439,12 @@ const show = computed(() => {
 const modelItems = computed(() =>
   Array.from(new Set([...modelOptions.value, ...(suggestModels[form.value.provider_key] || [])])),
 )
+
+// 配置表单标题 Logo：预设厂商或自定义时已识别的 provider_key
+const formLogo = computed(() => {
+  const key = currentPreset.value?.key || form.value.provider_key
+  return key && presetLogo(key) ? { src: presetLogo(key) } : null
+})
 
 const requiredRule = (v: unknown) => (v !== null && v !== undefined && String(v).trim() !== '') || '必填项'
 const nameRules = [requiredRule]
@@ -630,6 +680,14 @@ onMounted(() => { fetch(); fetchPresets() })
 </script>
 
 <style scoped>
+.provider-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.logo-mono-bg {
+  background: #ffffff;
+}
 .preset-card {
   cursor: pointer;
   transition: border-color 0.15s ease;

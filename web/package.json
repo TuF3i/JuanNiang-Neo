@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
+    "@lobehub/icons-static-svg": "^1.95.0",
     "@mdi/font": "^7.4.47",
     "axios": "^1.6.0",
     "codemirror": "^6.0.2",
