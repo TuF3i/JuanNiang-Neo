@@ -414,7 +414,7 @@
                   <template #no-data>
                     <div class="text-caption text-medium-emphasis pa-4 text-center">暂无审核记录</div>
                   </template>
-                </v-data-table>
+                </v-data-table-server>
               </v-card-text>
             </v-window-item>
           </v-window>
