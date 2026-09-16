@@ -44,6 +44,10 @@ func (f *fakeExecutor) HandleGroupRequest(flag, subType string, approve bool, re
 	return f.err
 }
 
+func (f *fakeExecutor) GetStrangerInfo(userID int64) (*adapter.StrangerInfo, error) {
+	return &adapter.StrangerInfo{UserID: userID, Nickname: fmt.Sprintf("用户%d", userID)}, nil
+}
+
 func (f *fakeExecutor) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -113,6 +117,11 @@ func setupManager(t *testing.T, llm provider.Provider) (*Manager, *fakeExecutor,
 	}
 	if err := db.AutoMigrate(&models.GroupJoinRequest{}, &models.GroupJoinReview{}, &models.GroupJoinReviewConfig{}); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// :memory: sqlite 每个连接是独立数据库；限单连接，避免异步补采 goroutine
+	// 从连接池拿到未建表的新连接（生产 Postgres 无此问题）
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	d := dao.NewJoinReviewDAO(db)
 	exec := &fakeExecutor{}

@@ -36,9 +36,10 @@ const (
 	defaultFlushSecond = 60 // 触发窗口默认值（秒）
 )
 
-// RequestExecutor 执行加群请求裁决的抽象（adapter.Adapter 实现之），便于测试替身。
+// RequestExecutor 执行加群请求相关外部调用的抽象（adapter.Adapter 实现之），便于测试替身。
 type RequestExecutor interface {
 	HandleGroupRequest(flag, subType string, approve bool, reason string) error
+	GetStrangerInfo(userID int64) (*adapter.StrangerInfo, error)
 }
 
 // ErrRequestBusy 请求正在审核中或已被处理（人工与 AI 抢占失败）。
@@ -186,6 +187,8 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 		log.Error("加群请求落库失败，跳过审核", "group", req.GroupID, "user", req.UserID, "err", err)
 		return false
 	}
+	// 请求事件不含昵称：后台异步经 get_stranger_info 补采（不阻塞事件循环，失败保持空）
+	go m.fetchUsername(ctx, rec)
 
 	cfg := m.getCfg(ctx)
 	batchSize, flushSeconds := batchParams(cfg)
@@ -208,6 +211,42 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 		go m.flushGroup(ctx, req.GroupID)
 	}
 	return true
+}
+
+// fetchUsername 异步补采申请人昵称（get_stranger_info），成功后回填 DB 行与缓冲内存对象。
+// 失败静默：面板回退展示 QQ 号，不阻塞审核流程。
+func (m *Manager) fetchUsername(ctx context.Context, rec *models.GroupJoinRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("fetchUsername panic", "id", rec.ID, "recover", r)
+		}
+	}()
+	// 脱离事件处理 ctx 的取消信号（否则 goroutine 刚起 ctx 就被取消）
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	info, err := m.adp.GetStrangerInfo(rec.UserID)
+	if err != nil || info == nil || strings.TrimSpace(info.Nickname) == "" {
+		log.Debug("申请人昵称补采失败，保持空", "user", rec.UserID, "err", err)
+		return
+	}
+	name := strings.TrimSpace(info.Nickname)
+	if err := m.dao.RequestUpdateUsername(cctx, rec.ID, name); err != nil {
+		log.Warn("申请人昵称回写失败", "id", rec.ID, "err", err)
+		return
+	}
+	m.setBufferedUsername(rec.GroupID, rec.ID, name)
+}
+
+// setBufferedUsername 回填缓冲中同一请求的昵称（若该请求仍在攒批缓冲内）。
+func (m *Manager) setBufferedUsername(gid int64, id uint, name string) {
+	m.bufMu.Lock()
+	defer m.bufMu.Unlock()
+	for _, it := range m.buf[gid] {
+		if it.ID == id {
+			it.Username = name
+			return
+		}
+	}
 }
 
 // bufSnapshot 缓冲快照长度（日志用）。
