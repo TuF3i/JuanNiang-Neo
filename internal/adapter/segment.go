@@ -90,17 +90,41 @@ var cqCodeRe = regexp.MustCompile(`\[CQ:(\w+)((?:,[^,\]]+=.*?)*)\]`)
 // LLM 偶尔生成 "[ CQ:face,id=66]" 这类格式，OneBot 无法解析会原样显示在消息里。
 var cqCodeNormalizeRe = regexp.MustCompile(`\[\s*CQ\s*:\s*(\w+)`)
 
+// face 幻觉码兜底（LLM 偶尔漏写 CQ: 前缀，或改用冒号/空格分隔）：
+//
+//	"[face,id=123]" / "[face id=123]" → "[CQ:face,id=123]"
+//	"[face:123]"                      → "[CQ:face,id=123]"
+//
+// 非数字 id 的畸形码（如 "[face:微笑]"）无法发送，直接剔除避免原文露出。
+var (
+	faceColonRe = regexp.MustCompile(`(?i)\[\s*face\s*:\s*(\d+)\s*\]`)
+	faceArgsRe  = regexp.MustCompile(`(?i)\[\s*face\s*[, ]\s*id\s*=\s*(\d+)\s*((?:,\s*[\w-]+\s*=[^,\]]*)*)\s*\]`)
+	faceJunkRe  = regexp.MustCompile(`(?i)\[\s*face(?:[\s:,][^\]]*)?\]`)
+)
+
 // NormalizeCQCodes 修复 CQ 码格式瑕疵，使其可被 cqCodeRe 正确解析：
 //
 //	"[ CQ:face,id=66]"   → "[CQ:face,id=66]"
 //	"[CQ : image,file=url]" → "[CQ:image,file=url]"
+//	"[face,id=123]" / "[face:123]" / "[face id=123]" → "[CQ:face,id=123]"（幻觉兜底）
 //
 // 参数部分（,key=value]）原样保留。
 func NormalizeCQCodes(s string) string {
-	if s == "" || !strings.Contains(s, "CQ") {
+	if s == "" {
 		return s
 	}
-	return cqCodeNormalizeRe.ReplaceAllString(s, "[CQ:$1")
+	// 空白瑕疵修复
+	if strings.Contains(s, "CQ") {
+		s = cqCodeNormalizeRe.ReplaceAllString(s, "[CQ:$1")
+	}
+	// face 幻觉码兜底：先改写可识别的数字 id 变体，再剔除剩余畸形码。
+	// 正则要求 [ 后紧跟 face，标准 [CQ:face,...] 不会被误改。
+	if strings.Contains(s, "face") || strings.Contains(s, "Face") || strings.Contains(s, "FACE") {
+		s = faceColonRe.ReplaceAllString(s, "[CQ:face,id=$1]")
+		s = faceArgsRe.ReplaceAllString(s, "[CQ:face,id=${1}${2}]")
+		s = faceJunkRe.ReplaceAllString(s, "")
+	}
+	return s
 }
 
 // ParseCQCodes 解析字符串中的 CQ 码, 返回消息段数组。
