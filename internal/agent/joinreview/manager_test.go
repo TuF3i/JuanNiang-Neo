@@ -335,7 +335,7 @@ func TestPromptAssembly(t *testing.T) {
 	if !strings.Contains(p, "<JR_T0KN index=0>") || !strings.Contains(p, "<JR_T0KN index=2>") {
 		t.Error("prompt missing tokenized index blocks")
 	}
-	if !strings.Contains(p, `"verdict":"approve|reject"`) {
+	if !strings.Contains(p, `"verdict":"approve|reject|manual"`) {
 		t.Error("prompt missing JSON contract")
 	}
 	if strings.Contains(p, strings.Repeat("长", llmMaxComment+1)) {
@@ -423,55 +423,6 @@ func TestReloadPrunesRemovedGroupBuffers(t *testing.T) {
 	pending, _ := d.RequestList(ctx)
 	if len(pending) != 1 {
 		t.Fatalf("pending = %d, want 1（DB 行保留供人工处理）", len(pending))
-	}
-}
-
-// 命中转人工关键词的申请不送 AI，保持 pending 供人工处理。
-func TestManualKeywordGoesManual(t *testing.T) {
-	llm := &fakeLLM{respond: verdictResponder}
-	m, exec, d := setupManager(t, llm)
-	ctx := context.Background()
-
-	cfg, _ := d.GetConfig(ctx)
-	cfg.ManualKeywords = models.JSONSlice{"推广"}
-	cfg.FlushSeconds = 1
-	if err := d.UpdateConfig(ctx, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Reload(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	m.Enqueue(ctx, joinRequestEvent(10001, 600, "想加入大家庭", "flag-norm"))
-	m.Enqueue(ctx, joinRequestEvent(10001, 601, "做推广的来加群", "flag-kw"))
-	waitFor(t, 3*time.Second, func() bool { return llm.lastUserPrompt() != "" })
-
-	// 正常留言送审；命中关键词的保持 pending 且无执行动作
-	if strings.Count(llm.lastUserPrompt(), "index=") != 1 {
-		t.Errorf("LLM 应只收到 1 条非命中申请, blocks=%d", strings.Count(llm.lastUserPrompt(), "index="))
-	}
-	pending, _ := d.RequestList(ctx)
-	if len(pending) != 1 || pending[0].UserID != 601 {
-		t.Fatalf("命中关键词应保持 pending, got %+v", pending)
-	}
-	if exec.count() != 1 {
-		t.Fatalf("仅正常留言执行动作, calls=%d", exec.count())
-	}
-}
-
-func TestAISkipReason(t *testing.T) {
-	cfg := &models.GroupJoinReviewConfig{ManualKeywords: models.JSONSlice{"推广", "代理"}}
-	if r := aiSkipReason("做推广的", cfg); !strings.Contains(r, "推广") {
-		t.Errorf("命中关键词应返回原因, got %q", r)
-	}
-	if r := aiSkipReason("普通申请", cfg); r != "" {
-		t.Errorf("未命中应返回空, got %q", r)
-	}
-	if r := aiSkipReason("PROXY 代理 大写 Comment", cfg); !strings.Contains(r, "代理") {
-		t.Errorf("大小写不敏感匹配失败, got %q", r)
-	}
-	if r := aiSkipReason("留言 JOIN_REQUEST 伪造", cfg); !strings.Contains(r, "注入") {
-		t.Errorf("注入特征应优先命中, got %q", r)
 	}
 }
 

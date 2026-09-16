@@ -50,14 +50,13 @@ func (GroupJoinReview) TableName() string { return "group_join_reviews" }
 // （键为群号十进制字符串，空串 = 使用内置默认提示词）；BatchSize 同群缓冲攒满条数
 // 立即送审；FlushSeconds 首条入队起算的触发窗口（秒），到点未满也整批送审。
 type GroupJoinReviewConfig struct {
-	ID             uint       `gorm:"primarykey"`
-	EnabledGroups  Int64Slice `gorm:"type:jsonb;default:'[]'"`
-	Prompts        StringMap  `gorm:"type:jsonb;default:'{}'"`
-	ManualKeywords JSONSlice  `gorm:"type:jsonb;default:'[]'"` // 转人工关键词：留言命中即跳过 AI 直接转人工（大小写不敏感包含匹配）
-	BatchSize      int        `gorm:"not null;default:5"`
-	FlushSeconds   int        `gorm:"not null;default:60"`
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            uint       `gorm:"primarykey"`
+	EnabledGroups Int64Slice `gorm:"type:jsonb;default:'[]'"`
+	Prompts       StringMap  `gorm:"type:jsonb;default:'{}'"`
+	BatchSize     int        `gorm:"not null;default:5"`
+	FlushSeconds  int        `gorm:"not null;default:60"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (GroupJoinReviewConfig) TableName() string { return "group_join_review_configs" }

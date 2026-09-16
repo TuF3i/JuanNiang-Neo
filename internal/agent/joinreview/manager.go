@@ -259,18 +259,17 @@ func (m *Manager) flushGroup(ctx context.Context, gid int64) {
 	}
 
 	cfg := m.getCfg(ctx)
-	// AI 送审前过滤：提示词注入 / 命中转人工关键词的申请不送 AI（避免扰动批量判定结构），转人工处理
+	// 提示词注入防护：留言含标记伪造特征的申请不送 AI（避免扰动批量判定结构），转人工处理
 	var aiItems, manualItems []*models.GroupJoinRequest
 	for _, rec := range claimed {
-		reason := aiSkipReason(rec.Comment, cfg)
-		if reason == "" {
-			aiItems = append(aiItems, rec)
+		if containsPromptInjection(rec.Comment) {
+			manualItems = append(manualItems, rec)
 			continue
 		}
-		manualItems = append(manualItems, rec)
-		log.Info("加群申请跳过 AI 转人工", "group", gid, "user", rec.UserID, "reason", reason)
+		aiItems = append(aiItems, rec)
 	}
 	if len(manualItems) > 0 {
+		log.Warn("加群申请疑似提示词注入，转人工处理", "group", gid, "count", len(manualItems))
 		for _, rec := range manualItems {
 			_ = m.dao.ReleaseRequest(ctx, rec.ID)
 		}
@@ -296,9 +295,8 @@ func (m *Manager) flushGroup(ctx context.Context, gid int64) {
 			_ = m.dao.ReleaseRequest(ctx, rec.ID)
 			continue
 		}
-		approve := res.Verdict == "approve"
 		log.Info("加群审核 AI 裁决", "group", gid, "user", rec.UserID, "verdict", res.Verdict, "reason", res.Reason)
-		if err := m.applyVerdict(ctx, rec, approve, "ai", res.Reason); err != nil {
+		if err := m.applyVerdict(ctx, rec, res.Verdict, "ai", res.Reason); err != nil {
 			log.Warn("加群审核裁决执行失败，保留待审行", "group", gid, "user", rec.UserID, "err", err)
 		}
 	}
@@ -352,18 +350,25 @@ func (m *Manager) ManualDecide(ctx context.Context, id uint, approve bool, reaso
 			reason = "管理员手动拒绝"
 		}
 	}
-	return m.applyVerdict(ctx, rec, approve, "manual", reason)
-}
-
-// applyVerdict 单条审核终态：调 OneBot 执行（通过/拒绝）→ 落审核记录 → 两者皆成功才删待审行。
-// 返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
-// 执行失败（flag 过期/平台错误等）或审核记录落库失败时，待审行释放回 pending 保留可重试。
-func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, approve bool, reviewer, reason string) error {
 	verdict := "reject"
 	if approve {
 		verdict = "approve"
 	}
-	execErr := m.adp.HandleGroupRequest(rec.Flag, rec.SubType, approve, reason)
+	return m.applyVerdict(ctx, rec, verdict, "manual", reason)
+}
+
+// applyVerdict 单条审核终态：approve/reject 调 OneBot 执行后按结果处理待审行；
+// manual（AI 建议转人工）不调 OneBot，释放回 pending 留在待审列表由人工处理。
+// 三种裁决均落审核记录。返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
+func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, verdict, reviewer, reason string) error {
+	var execErr error
+	if verdict == "approve" || verdict == "reject" {
+		execErr = m.adp.HandleGroupRequest(rec.Flag, rec.SubType, verdict == "approve", reason)
+		if execErr != nil {
+			reason = fmt.Sprintf("【执行失败，请人工在 QQ 中处理】%s（错误：%v）", reason, execErr)
+			log.Warn("加群审核动作执行失败", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict, "err", execErr)
+		}
+	}
 	if execErr != nil {
 		reason = fmt.Sprintf("【执行失败，请人工在 QQ 中处理】%s（错误：%v）", reason, execErr)
 		log.Warn("加群审核动作执行失败", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict, "err", execErr)
@@ -384,31 +389,22 @@ func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest
 		_ = m.dao.ReleaseRequest(ctx, rec.ID)
 		return fmt.Errorf("审核记录落库失败: %w", err)
 	}
-	if execErr == nil {
+	switch {
+	case verdict == "manual":
+		// AI 建议转人工：释放回 pending，留在待审列表由人工处理
+		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
+			log.Error("转人工请求释放失败", "id", rec.ID, "err", err)
+		}
+	case execErr == nil:
 		if err := m.dao.RequestDelete(ctx, rec.ID); err != nil {
 			log.Error("待审请求删除失败", "id", rec.ID, "err", err)
 		}
-	} else if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
-		log.Error("待审请求释放失败", "id", rec.ID, "err", err)
-	}
-	return execErr
-}
-
-// aiSkipReason 判断该申请是否跳过 AI 转人工；返回空串 = 正常送 AI。
-// 规则：提示词注入特征 > 命中管理员配置的转人工关键词（大小写不敏感包含匹配）。
-func aiSkipReason(comment string, cfg *models.GroupJoinReviewConfig) string {
-	if containsPromptInjection(comment) {
-		return "留言含提示词注入特征"
-	}
-	if cfg != nil {
-		lc := strings.ToLower(comment)
-		for _, kw := range cfg.ManualKeywords {
-			if kw = strings.TrimSpace(kw); kw != "" && strings.Contains(lc, strings.ToLower(kw)) {
-				return "留言命中转人工关键词: " + kw
-			}
+	default:
+		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
+			log.Error("待审请求释放失败", "id", rec.ID, "err", err)
 		}
 	}
-	return ""
+	return execErr
 }
 
 // groupPromptKey 每群提示词在配置 map 中的键（群号十进制字符串）。

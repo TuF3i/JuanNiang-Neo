@@ -549,7 +549,7 @@ export interface JoinReviewRecordItem {
   user_id: number
   username: string
   comment: string
-  verdict: 'approve' | 'reject'
+  verdict: 'approve' | 'reject' | 'manual'
   reviewer: 'ai' | 'manual'
   reason: string
   reviewed_at: string
@@ -558,7 +558,6 @@ export interface JoinReviewRecordListResp { total: number; list: JoinReviewRecor
 export interface JoinReviewConfig {
   enabled_groups: number[]
   prompts: Record<string, string>
-  manual_keywords: string[]
   batch_size: number
   flush_seconds: number
 }
