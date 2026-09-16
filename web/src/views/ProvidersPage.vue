@@ -260,7 +260,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { providerApi, providerPresetsApi, type ProviderResp, type ProviderPreset, type AddProviderReq, type TestProviderResp } from '@/api'
+import { providerApi, providerPresetsApi, type ProviderResp, type ProviderPreset, type AddProviderReq, type TestProviderResp, type ProviderModelsResp } from '@/api'
 import { useToastStore } from '@/stores/toast'
 
 const toastStore = useToastStore()
@@ -524,37 +524,26 @@ function onProtocolChange() {
   }
 }
 
-// 从 Provider API 直接拉取模型列表（GET {endpoint}/models）。
-// 浏览器直连受 CORS 限制：失败时提示并留空，combobox 始终支持手动输入。
+// 拉取模型列表：走后端代理 POST /providers/models（绕开浏览器 CORS，无需暴露 Key 给浏览器跨域请求）
 async function fetchModels() {
   const ep = (form.value.endpoint || '').trim()
   if (!ep) { toastStore.warning('请先填写 API 地址'); return }
   fetchingModels.value = true
   try {
-    const url = ep.replace(/\/+$/, '') + '/models'
-    const headers: Record<string, string> = {}
-    const key = (form.value.token || '').trim()
-    if (key) {
-      const ah = form.value.auth_header || 'bearer'
-      if (ah === 'x-api-key') headers['x-api-key'] = key
-      else if (ah === 'api-key') headers['api-key'] = key
-      else headers['Authorization'] = `Bearer ${key}`
-    }
-    const resp = await window.fetch(url, { headers })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data: any = await resp.json()
-    const arr = Array.isArray(data) ? data : (data?.data ?? data?.models ?? [])
-    const ids = arr
-      .map((x: any) => (typeof x === 'string' ? x : x?.id || x?.name))
-      .filter((x: any): x is string => typeof x === 'string' && x.trim() !== '')
-    modelOptions.value = Array.from(new Set(ids))
-    if (modelOptions.value.length === 0) {
-      toastStore.warning('API 未返回模型列表，可手动输入模型名')
+    const res = (await providerApi.listModels({
+      endpoint: ep,
+      token: form.value.token || '',
+      auth_header: form.value.auth_header || '',
+      api_mode: form.value.api_mode,
+    })).data.data as ProviderModelsResp
+    if (res.ok && res.models.length) {
+      modelOptions.value = res.models
+      toastStore.success(res.message || `已获取 ${res.models.length} 个模型`)
     } else {
-      toastStore.success(`已获取 ${modelOptions.value.length} 个模型`)
+      toastStore.warning(res.message || 'API 未返回模型列表，可手动输入模型名')
     }
-  } catch {
-    toastStore.warning('获取模型列表失败（浏览器 CORS / 网络限制），可手动输入模型名')
+  } catch (e: any) {
+    toastStore.warning(e?.message || '获取模型列表失败，可手动输入模型名')
   } finally {
     fetchingModels.value = false
   }

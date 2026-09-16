@@ -391,6 +391,13 @@ export const mockHandlers: MockHandler[] = [
     handler() { return ok({ ok: true, message: 'mock 环境：连接测试通过' }) }
   },
   {
+    // 模型列表代理：mock 返回固定示例列表
+    method: 'POST', path: '/providers/models',
+    handler() {
+      return ok({ ok: true, message: '已获取 6 个模型', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o3-mini', 'gpt-4o-audio-preview', 'chatgpt-4o-latest'] })
+    }
+  },
+  {
     method: 'GET', path: '/providers/:id',
     handler({ params }) {
       const p = providers.find((p) => p.id === params.id)
