@@ -106,6 +106,16 @@
               <v-col cols="12" sm="6">
                 <v-select v-model="form.type" :items="types" label="类型" />
               </v-col>
+              <v-col cols="12">
+                <v-switch
+                  v-model="form.isActive"
+                  label="激活"
+                  color="primary"
+                  density="compact"
+                  hint="同类型仅一个 Active"
+                  persistent-hint
+                />
+              </v-col>
             </v-row>
 
             <v-divider class="my-3" />
@@ -180,54 +190,68 @@
               </v-col>
             </v-row>
 
-            <template v-if="show.thinking">
-              <v-divider class="my-3" />
-              <!-- 思考 -->
-              <div class="text-subtitle-2 mb-2">思考（Thinking）</div>
-              <v-row>
-                <v-col cols="12" sm="6" md="4">
-                  <v-select v-model="form.thinking_effort" :items="thinkingEfforts" label="思考强度" />
-                </v-col>
-                <v-col cols="12" sm="6" md="4">
-                  <v-text-field v-model="form.thinking_budget" label="Thinking Budget（0=默认）" type="number" />
-                </v-col>
-              </v-row>
-            </template>
-
-            <v-divider class="my-3" />
-            <!-- 高级设置 -->
-            <div class="text-subtitle-2 mb-2">高级设置</div>
-            <v-row>
-              <v-col cols="12" sm="6" md="4">
-                <v-text-field v-model="form.temperature" label="温度" type="number" step="0.1" />
-              </v-col>
-              <v-col cols="12" sm="6" md="4">
-                <v-text-field v-model="form.max_tokens" label="Max Tokens（0=默认）" type="number" />
-              </v-col>
-              <v-col cols="12" sm="6" md="4">
-                <v-switch v-model="form.isActive" label="激活" color="primary" />
-              </v-col>
-            </v-row>
-            <v-row>
-              <v-col v-if="show.topP" cols="12" sm="6" md="4">
-                <v-text-field v-model="form.top_p" label="Top P" type="number" step="0.05" />
-              </v-col>
-              <v-col v-if="show.topK" cols="12" sm="6" md="4">
-                <v-text-field v-model="form.top_k" label="Top K" type="number" />
-              </v-col>
-              <v-col v-if="show.freqPresence" cols="12" sm="6" md="4">
-                <v-text-field v-model="form.frequency_penalty" label="Frequency Penalty" type="number" step="0.1" />
-              </v-col>
-              <v-col v-if="show.freqPresence" cols="12" sm="6" md="4">
-                <v-text-field v-model="form.presence_penalty" label="Presence Penalty" type="number" step="0.1" />
-              </v-col>
-              <v-col v-if="show.repetition" cols="12" sm="6" md="4">
-                <v-text-field v-model="form.repetition_penalty" label="Repetition Penalty" type="number" step="0.1" />
-              </v-col>
-            </v-row>
-            <div class="text-caption text-medium-emphasis mt-1">
-              思考强度支持 关/低/中/高，按厂商矩阵适配（DeepSeek/智谱/Kimi/通义/阶跃/MiniMax 等）。
-            </div>
+            <v-expansion-panels v-model="expandedPanels" variant="accordion" multiple class="mt-1">
+              <v-expansion-panel v-if="show.thinking" value="thinking">
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center ga-2">
+                    <span class="text-subtitle-2">思考（Thinking）</span>
+                    <v-chip size="x-small" variant="tonal" :color="form.thinking_effort !== 'off' ? 'primary' : 'default'">
+                      {{ thinkingEffortLabel }}
+                    </v-chip>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-row>
+                    <v-col cols="12" sm="6" md="4">
+                      <v-select v-model="form.thinking_effort" :items="thinkingEfforts" label="思考强度" />
+                    </v-col>
+                    <v-col cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.thinking_budget" label="Thinking Budget（0=默认）" type="number" />
+                    </v-col>
+                  </v-row>
+                  <div class="text-caption text-medium-emphasis">
+                    思考强度支持 关/低/中/高，按厂商矩阵适配（DeepSeek/智谱/Kimi/通义/阶跃/MiniMax 等）。
+                  </div>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+              <v-expansion-panel value="advanced">
+                <v-expansion-panel-title>
+                  <div class="d-flex align-center ga-2">
+                    <span class="text-subtitle-2">高级设置</span>
+                    <span class="text-caption text-medium-emphasis">
+                      温度 {{ form.temperature ?? 0.7 }}<template v-if="advancedCount"> · 已配置 {{ advancedCount }} 项采样参数</template>
+                    </span>
+                  </div>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-row>
+                    <v-col cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.temperature" label="温度" type="number" step="0.1" />
+                    </v-col>
+                    <v-col cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.max_tokens" label="Max Tokens（0=默认）" type="number" />
+                    </v-col>
+                  </v-row>
+                  <v-row>
+                    <v-col v-if="show.topP" cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.top_p" label="Top P" type="number" step="0.05" />
+                    </v-col>
+                    <v-col v-if="show.topK" cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.top_k" label="Top K" type="number" />
+                    </v-col>
+                    <v-col v-if="show.freqPresence" cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.frequency_penalty" label="Frequency Penalty" type="number" step="0.1" />
+                    </v-col>
+                    <v-col v-if="show.freqPresence" cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.presence_penalty" label="Presence Penalty" type="number" step="0.1" />
+                    </v-col>
+                    <v-col v-if="show.repetition" cols="12" sm="6" md="4">
+                      <v-text-field v-model="form.repetition_penalty" label="Repetition Penalty" type="number" step="0.1" />
+                    </v-col>
+                  </v-row>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
           </v-form>
 
           <!-- 测试结果状态 -->
@@ -444,6 +468,16 @@ const requiredRule = (v: unknown) => (v !== null && v !== undefined && String(v)
 const nameRules = [requiredRule]
 const endpointRules = [requiredRule]
 
+// 折叠面板：思考/高级设置默认收起；编辑已开启思考的 Provider 时自动展开思考面板
+const expandedPanels = ref<string[]>([])
+const thinkingEffortLabel = computed(
+  () => thinkingEfforts.find((t) => t.value === form.value.thinking_effort)?.title ?? form.value.thinking_effort,
+)
+const advancedCount = computed(
+  () => [form.value.top_p, form.value.top_k, form.value.frequency_penalty, form.value.presence_penalty, form.value.repetition_penalty]
+    .filter((v) => v !== null && v !== undefined).length,
+)
+
 const defaultForm = (): AddProviderReq => ({
   name: '', type: 'text_model', endpoint: '', token: '', model: '', temperature: 0.7,
   isActive: false, enable_thinking: false, api_mode: 'chat_completions', thinking_effort: 'off',
@@ -479,6 +513,7 @@ function choosePreset(p: ProviderPreset) {
   editing.value = null
   isCustom.value = false
   currentPreset.value = p
+  expandedPanels.value = []
   form.value = { ...defaultForm(), provider_key: p.key }
   modelOptions.value = []
   testResult.value = null
@@ -498,6 +533,7 @@ function chooseCustom() {
   editing.value = null
   isCustom.value = true
   currentPreset.value = null
+  expandedPanels.value = []
   form.value = defaultForm()
   modelOptions.value = []
   presetNote.value = ''
@@ -531,6 +567,7 @@ function openEdit(item: ProviderResp) {
     presetNote.value = ''
   }
   modelOptions.value = item.model ? [item.model] : []
+  expandedPanels.value = (item.thinking_effort || 'off') !== 'off' ? ['thinking'] : []
   testResult.value = null
   formDialog.value = true
 }
