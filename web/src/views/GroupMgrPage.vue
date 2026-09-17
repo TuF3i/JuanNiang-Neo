@@ -1186,6 +1186,9 @@ async function decideJoinRequest(item: JoinReviewRequestItem, approve: boolean, 
     await loadJoinRecords()
   } catch (e: any) {
     toastStore.error(e?.message || '操作失败')
+    // 报错时待审行可能已被后端处理（如其他管理员已在 QQ 侧处理并自动丢弃），刷新兜底
+    await loadJoinRequests()
+    await loadJoinRecords()
   } finally {
     decidingId.value = null
   }
