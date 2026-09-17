@@ -453,7 +453,7 @@ func groupMgrConfigResp(cfg *models.GroupMgrConfig) dto.GroupMgrConfigResp {
 		Enabled: cfg.Enabled, LLMReview: cfg.LLMReview,
 		BlackMinScore:  cfg.BlackMinScore,
 		LLMBatchWindow: cfg.LLMBatchWindow, LLMContext: cfg.LLMContext,
-		ImgSpamWindow:  cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
+		ImgSpamWindow: cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
 		EnableCopyCheck: cfg.EnableCopyCheck, CopyThreshold: cfg.CopyThreshold,
 		ViolationMuteSeconds: cfg.ViolationMuteSeconds,
 		ExcludeGroups:        cfg.ExcludeGroups,
