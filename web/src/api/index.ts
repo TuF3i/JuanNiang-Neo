@@ -490,6 +490,7 @@ export interface GroupMgrConfigResp {
   llm_review: boolean
   black_min_score: number
   llm_batch_window: number
+  llm_context: boolean
   img_spam_window: number
   img_spam_threshold: number
   img_mute_duration: number
@@ -508,6 +509,7 @@ export interface UpdateGroupMgrConfigReq {
   llm_review: boolean
   black_min_score: number
   llm_batch_window: number
+  llm_context: boolean
   img_spam_window: number
   img_spam_threshold: number
   img_mute_duration: number

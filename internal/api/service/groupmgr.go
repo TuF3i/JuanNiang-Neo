@@ -62,6 +62,7 @@ func (s *Service) UpdateGroupMgrConfig(ctx context.Context, c *app.RequestContex
 	}
 	cfg.Enabled = data.Enabled
 	cfg.LLMReview = data.LLMReview
+	cfg.LLMContext = data.LLMContext
 	if data.BlackMinScore > 0 && data.BlackMinScore <= 1 {
 		cfg.BlackMinScore = data.BlackMinScore
 	}
@@ -451,7 +452,7 @@ func groupMgrConfigResp(cfg *models.GroupMgrConfig) dto.GroupMgrConfigResp {
 	return dto.GroupMgrConfigResp{
 		Enabled: cfg.Enabled, LLMReview: cfg.LLMReview,
 		BlackMinScore:  cfg.BlackMinScore,
-		LLMBatchWindow: cfg.LLMBatchWindow,
+		LLMBatchWindow: cfg.LLMBatchWindow, LLMContext: cfg.LLMContext,
 		ImgSpamWindow:  cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
 		EnableCopyCheck: cfg.EnableCopyCheck, CopyThreshold: cfg.CopyThreshold,
 		ViolationMuteSeconds: cfg.ViolationMuteSeconds,
