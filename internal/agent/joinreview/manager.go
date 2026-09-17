@@ -197,9 +197,6 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 		log.Error("加群请求落库失败，跳过审核", "group", req.GroupID, "user", req.UserID, "err", err)
 		return false
 	}
-	// 请求事件不含昵称：后台异步经 get_stranger_info 补采（不阻塞事件循环，失败保持空）
-	go m.fetchUsername(ctx, rec)
-
 	cfg := m.getCfg(ctx)
 	batchSize, flushSeconds := batchParams(cfg)
 
@@ -215,6 +212,11 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 		})
 	}
 	m.bufMu.Unlock()
+
+	// 请求事件不含昵称：后台异步经 get_stranger_info 补采（不阻塞事件循环，失败保持空）。
+	// 必须在入缓冲之后、满批触发 flushGroup 之前启动：保证 setBufferedUsername
+	// 回填时记录已在缓冲内（否则可能先扫后插，昵称回填丢失），且不落后于送审触发。
+	go m.fetchUsername(ctx, rec)
 
 	log.Info("加群请求已入审核缓冲", "group", req.GroupID, "user", req.UserID, "buffered", len(m.bufSnapshot(req.GroupID)), "batch_size", batchSize)
 	if full {
