@@ -504,8 +504,9 @@ type ReplyStrategyResp struct {
 type GroupMgrConfigResp struct {
 	Enabled              bool     `json:"enabled"`
 	LLMReview            bool     `json:"llm_review"`
-	BlackMinScore        float64  `json:"black_min_score"`  // 黑名单语录命中阈值
-	LLMBatchWindow       int      `json:"llm_batch_window"` // LLM 判定批窗口（秒）
+	BlackMinScore        float64  `json:"black_min_score"`   // 黑名单语录命中阈值
+	LLMBatchWindow       int      `json:"llm_batch_window"`  // LLM 判定批窗口（秒）
+	LLMContextCount      int      `json:"llm_context_count"` // 送审附带各群最近聊天记录条数（0=关闭）
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
 	ImgMuteDuration      int      `json:"img_mute_duration"`

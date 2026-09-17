@@ -63,6 +63,12 @@ func (d *JoinReviewDAO) RequestGet(ctx context.Context, id uint) (*models.GroupJ
 	return &req, nil
 }
 
+// RequestUpdateUsername 回填申请人昵称（get_stranger_info 异步补采用）。
+func (d *JoinReviewDAO) RequestUpdateUsername(ctx context.Context, id uint, username string) error {
+	return d.db.WithContext(ctx).Model(&models.GroupJoinRequest{}).Where("id = ?", id).
+		Update("username", username).Error
+}
+
 // RequestDelete 删除待审请求（审核终态落库后调用；行存在即 pending）。
 func (d *JoinReviewDAO) RequestDelete(ctx context.Context, id uint) error {
 	return d.db.WithContext(ctx).Delete(&models.GroupJoinRequest{}, id).Error

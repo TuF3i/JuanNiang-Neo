@@ -26,7 +26,10 @@ client.interceptors.response.use(
       return res
     }
     if (res.data?.status !== 0) {
-      return Promise.reject(new Error(res.data?.info || 'Unknown error'))
+      // 优先取后端附带的 error_detail（具体原因，如"该请求已被其他管理员在 QQ 侧处理"），
+      // 缺失时回退 info 概述
+      const message = res.data?.data?.error_detail || res.data?.info || 'Unknown error'
+      return Promise.reject(new Error(message))
     }
     return res
   },

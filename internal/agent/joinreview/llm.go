@@ -86,12 +86,12 @@ func (m *Manager) reviewBatch(ctx context.Context, cfg *models.GroupJoinReviewCo
 			log.Warn("加群审核裁决索引非法，忽略", "index", r.Index, "batch_size", len(items))
 			continue
 		}
-		if r.Verdict != "approve" && r.Verdict != "reject" {
+		if r.Verdict != "approve" && r.Verdict != "reject" && r.Verdict != "manual" {
 			log.Warn("加群审核裁决 verdict 非法，忽略", "index", r.Index, "verdict", r.Verdict)
 			continue
 		}
 		if strings.TrimSpace(r.Reason) == "" {
-			r.Reason = "AI 判定" + map[string]string{"approve": "通过", "reject": "拒绝"}[r.Verdict]
+			r.Reason = map[string]string{"approve": "AI 判定通过", "reject": "AI 判定拒绝", "manual": "AI 建议转人工"}[r.Verdict]
 		}
 		seen[r.Index] = true
 		out[r.Index] = r
@@ -128,9 +128,9 @@ func batchUserPrompt(items []*models.GroupJoinRequest, token string) string {
 		}
 		fmt.Fprintf(&sb, "<JR_%s index=%d>\nQQ: %d\n留言: %s\n</JR_%s>\n", token, i, it.UserID, comment, token)
 	}
-	sb.WriteString("\n请严格按以下 JSON 格式逐条输出判定结果（index 必须与上方 <JOIN_REQUEST> 的 index 对应）：\n")
-	sb.WriteString(`{"results":[{"index":0,"verdict":"approve|reject","reason":"一句话理由"}` + "]}\n")
-	sb.WriteString("verdict 取值：approve=通过 / reject=拒绝；reason 为一句话理由（拒绝时会发送给申请者，请友好）。只输出 JSON，不要输出任何其它文字。")
+	sb.WriteString("\n请严格按以下 JSON 格式逐条输出判定结果（index 必须与上方块的 index 对应）：\n")
+	sb.WriteString(`{"results":[{"index":0,"verdict":"approve|reject|manual","reason":"一句话理由"}` + "]}\n")
+	sb.WriteString("verdict 取值：approve=通过 / reject=拒绝 / manual=转人工（信息不足、拿不准或涉及敏感决定时使用）；reason 为一句话理由（拒绝时会发送给申请者，请友好）。只输出 JSON，不要输出任何其它文字。")
 	return sb.String()
 }
 

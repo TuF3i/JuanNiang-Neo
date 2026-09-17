@@ -31,6 +31,7 @@ func (d *GroupMgrDAO) InitConfig(ctx context.Context) error {
 		ID:                   1,
 		BlackMinScore:        0.7,
 		LLMBatchWindow:       3,
+		LLMContextCount:      20,
 		ImgSpamWindow:        2,
 		ImgSpamThreshold:     3,
 		ImgMuteDuration:      60,

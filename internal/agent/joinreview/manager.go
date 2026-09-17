@@ -36,13 +36,24 @@ const (
 	defaultFlushSecond = 60 // 触发窗口默认值（秒）
 )
 
-// RequestExecutor 执行加群请求裁决的抽象（adapter.Adapter 实现之），便于测试替身。
+// RequestExecutor 执行加群请求相关外部调用的抽象（adapter.Adapter 实现之），便于测试替身。
 type RequestExecutor interface {
 	HandleGroupRequest(flag, subType string, approve bool, reason string) error
+	GetStrangerInfo(userID int64) (*adapter.StrangerInfo, error)
 }
 
 // ErrRequestBusy 请求正在审核中或已被处理（人工与 AI 抢占失败）。
 var ErrRequestBusy = errors.New("该请求正在审核中或已被处理")
+
+// onebotHandledMark OneBot 对「已被处理的请求再操作」的返回特征（retcode=100）：
+// 其他管理员已在 QQ 侧同意/拒绝后，机器人再执行即报此错。
+const onebotHandledMark = "retcode=100"
+
+// isRequestHandledErr 判断 OneBot 错误是否为「请求已被处理/失效」。
+// 此时该请求在 QQ 侧已是终态，机器人应丢弃待审行（面板列表不与 QQ 状态同步，此处弥补）。
+func isRequestHandledErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), onebotHandledMark)
+}
 
 // Manager 加群审核。
 type Manager struct {
@@ -186,7 +197,6 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 		log.Error("加群请求落库失败，跳过审核", "group", req.GroupID, "user", req.UserID, "err", err)
 		return false
 	}
-
 	cfg := m.getCfg(ctx)
 	batchSize, flushSeconds := batchParams(cfg)
 
@@ -203,11 +213,52 @@ func (m *Manager) Enqueue(ctx context.Context, ev adapter.Event) bool {
 	}
 	m.bufMu.Unlock()
 
+	// 请求事件不含昵称：后台异步经 get_stranger_info 补采（不阻塞事件循环，失败保持空）。
+	// 必须在入缓冲之后、满批触发 flushGroup 之前启动：保证 setBufferedUsername
+	// 回填时记录已在缓冲内（否则可能先扫后插，昵称回填丢失），且不落后于送审触发。
+	go m.fetchUsername(ctx, rec)
+
 	log.Info("加群请求已入审核缓冲", "group", req.GroupID, "user", req.UserID, "buffered", len(m.bufSnapshot(req.GroupID)), "batch_size", batchSize)
 	if full {
 		go m.flushGroup(ctx, req.GroupID)
 	}
 	return true
+}
+
+// fetchUsername 异步补采申请人昵称（get_stranger_info），成功后回填 DB 行与缓冲内存对象。
+// 失败静默：面板回退展示 QQ 号，不阻塞审核流程。
+func (m *Manager) fetchUsername(ctx context.Context, rec *models.GroupJoinRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("fetchUsername panic", "id", rec.ID, "recover", r)
+		}
+	}()
+	// 脱离事件处理 ctx 的取消信号（否则 goroutine 刚起 ctx 就被取消）
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	info, err := m.adp.GetStrangerInfo(rec.UserID)
+	if err != nil || info == nil || strings.TrimSpace(info.Nickname) == "" {
+		log.Debug("申请人昵称补采失败，保持空", "user", rec.UserID, "err", err)
+		return
+	}
+	name := strings.TrimSpace(info.Nickname)
+	if err := m.dao.RequestUpdateUsername(cctx, rec.ID, name); err != nil {
+		log.Warn("申请人昵称回写失败", "id", rec.ID, "err", err)
+		return
+	}
+	m.setBufferedUsername(rec.GroupID, rec.ID, name)
+}
+
+// setBufferedUsername 回填缓冲中同一请求的昵称（若该请求仍在攒批缓冲内）。
+func (m *Manager) setBufferedUsername(gid int64, id uint, name string) {
+	m.bufMu.Lock()
+	defer m.bufMu.Unlock()
+	for _, it := range m.buf[gid] {
+		if it.ID == id {
+			it.Username = name
+			return
+		}
+	}
 }
 
 // bufSnapshot 缓冲快照长度（日志用）。
@@ -295,9 +346,8 @@ func (m *Manager) flushGroup(ctx context.Context, gid int64) {
 			_ = m.dao.ReleaseRequest(ctx, rec.ID)
 			continue
 		}
-		approve := res.Verdict == "approve"
 		log.Info("加群审核 AI 裁决", "group", gid, "user", rec.UserID, "verdict", res.Verdict, "reason", res.Reason)
-		if err := m.applyVerdict(ctx, rec, approve, "ai", res.Reason); err != nil {
+		if err := m.applyVerdict(ctx, rec, res.Verdict, "ai", res.Reason); err != nil {
 			log.Warn("加群审核裁决执行失败，保留待审行", "group", gid, "user", rec.UserID, "err", err)
 		}
 	}
@@ -351,18 +401,34 @@ func (m *Manager) ManualDecide(ctx context.Context, id uint, approve bool, reaso
 			reason = "管理员手动拒绝"
 		}
 	}
-	return m.applyVerdict(ctx, rec, approve, "manual", reason)
-}
-
-// applyVerdict 单条审核终态：调 OneBot 执行（通过/拒绝）→ 落审核记录 → 两者皆成功才删待审行。
-// 返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
-// 执行失败（flag 过期/平台错误等）或审核记录落库失败时，待审行释放回 pending 保留可重试。
-func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, approve bool, reviewer, reason string) error {
 	verdict := "reject"
 	if approve {
 		verdict = "approve"
 	}
-	execErr := m.adp.HandleGroupRequest(rec.Flag, rec.SubType, approve, reason)
+	return m.applyVerdict(ctx, rec, verdict, "manual", reason)
+}
+
+// applyVerdict 单条审核终态：approve/reject 调 OneBot 执行后按结果处理待审行；
+// manual（AI 建议转人工）不调 OneBot，释放回 pending 留在待审列表由人工处理。
+// 三种裁决均落审核记录。返回 OneBot 执行错误（供人工审核路径透传给面板提示）。
+func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest, verdict, reviewer, reason string) error {
+	var execErr error
+	handled := false
+	if verdict == "approve" || verdict == "reject" {
+		execErr = m.adp.HandleGroupRequest(rec.Flag, rec.SubType, verdict == "approve", reason)
+		switch {
+		case isRequestHandledErr(execErr):
+			// 其他管理员已在 QQ 侧同意/拒绝：请求已是终态，丢弃待审行
+			// （面板待审列表不与 QQ 侧状态同步，此处弥补）
+			handled = true
+			execErr = fmt.Errorf("该请求已被其他管理员在 QQ 侧处理，已自动丢弃待审行（%w）", execErr)
+			reason = execErr.Error()
+			log.Info("加群请求已被其他管理员处理，自动丢弃", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict)
+		case execErr != nil:
+			reason = fmt.Sprintf("【执行失败，请人工在 QQ 中处理】%s（错误：%v）", reason, execErr)
+			log.Warn("加群审核动作执行失败", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict, "err", execErr)
+		}
+	}
 	if execErr != nil {
 		reason = fmt.Sprintf("【执行失败，请人工在 QQ 中处理】%s（错误：%v）", reason, execErr)
 		log.Warn("加群审核动作执行失败", "group", rec.GroupID, "user", rec.UserID, "verdict", verdict, "err", execErr)
@@ -383,12 +449,22 @@ func (m *Manager) applyVerdict(ctx context.Context, rec *models.GroupJoinRequest
 		_ = m.dao.ReleaseRequest(ctx, rec.ID)
 		return fmt.Errorf("审核记录落库失败: %w", err)
 	}
-	if execErr == nil {
+	switch {
+	case verdict == "manual":
+		// AI 建议转人工：释放回 pending，留在待审列表由人工处理
+		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
+			log.Error("转人工请求释放失败", "id", rec.ID, "err", err)
+		}
+	case execErr == nil || handled:
+		// 执行成功，或请求已被其他管理员处理（已终态）→ 丢弃待审行
 		if err := m.dao.RequestDelete(ctx, rec.ID); err != nil {
 			log.Error("待审请求删除失败", "id", rec.ID, "err", err)
 		}
-	} else if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
-		log.Error("待审请求释放失败", "id", rec.ID, "err", err)
+	default:
+		// 真实执行失败（flag 过期等）：释放回 pending 保留可重试
+		if err := m.dao.ReleaseRequest(ctx, rec.ID); err != nil {
+			log.Error("待审请求释放失败", "id", rec.ID, "err", err)
+		}
 	}
 	return execErr
 }

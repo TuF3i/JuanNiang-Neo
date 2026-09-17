@@ -378,6 +378,7 @@ type UpdateGroupMgrConfigReq struct {
 	LLMReview            bool     `json:"llm_review"`
 	BlackMinScore        float64  `json:"black_min_score"`
 	LLMBatchWindow       int      `json:"llm_batch_window"`
+	LLMContextCount      int      `json:"llm_context_count"` // 送审附带各群最近聊天记录条数（0=关闭）
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
 	ImgMuteDuration      int      `json:"img_mute_duration"`
