@@ -88,18 +88,20 @@ func TestSplitMessagesEmojiSequence(t *testing.T) {
 	}
 }
 
-// TestSplitMessagesNewlineAsSplitPoint 换行也是拆分点：长内容按行拆分为多条消息。
-func TestSplitMessagesNewlineAsSplitPoint(t *testing.T) {
-	content := strings.Repeat("第一行内容比较长一些。", 5) + "\n" + strings.Repeat("第二行内容也比较长。", 5)
+// TestSplitMessagesMultiLineListStaysWhole 换行不是拆分点：无句读的多行列表
+// （如部门介绍）整体保持在一条消息内，不再被 60 字贪心合并从中间切开。
+func TestSplitMessagesMultiLineListStaysWhole(t *testing.T) {
+	content := "红岩网校是重邮团委旗下唯一互联网开发运营的学生组织，七大部门喵：\n" +
+		"产品策划及运营部：产品设计蓝图\n" +
+		"视觉设计部：用色彩渲染世界\n" +
+		"前端研发部：网站小程序幕后画师\n" +
+		"后端研发部：网校最可靠保障\n" +
+		"移动开发部：APP无限可能\n" +
+		"运维安全部（SRE）：系统稳定守护者\n" +
+		"AI部：主攻AI应用落地想了解详情发 /redrock 喵～"
 	parts := splitMessages(content)
-	if len(parts) < 2 {
-		t.Fatalf("长内容应按换行拆分为多段: %v", parts)
-	}
-	// 每段内不应残留换行（换行已作为拆分点被消费）
-	for i, p := range parts {
-		if strings.Contains(p, "\n") {
-			t.Fatalf("段 %d 内不应包含换行: %q", i, p)
-		}
+	if len(parts) != 1 || parts[0] != content {
+		t.Fatalf("无句读的多行列表应整体一条消息，实际 %d 段: %v", len(parts), parts)
 	}
 }
 
