@@ -1353,7 +1353,8 @@ func parseCQCode(s string) adapter.Segment {
 // splitMessages 将回复文本拆分为多条消息（最多 3 段）。
 // 优先按空行（≥2 个连续换行）做"强分段"——LLM 用空行表示独立回复意图，
 // 无论字数多少都应拆分（避免把"@A 回复1\n\n@B 回复2"合并成一条发送）。
-// 每个 block 内部再走 splitMessagesBlock 做软分段，最后统一硬限制到 3 段。
+// 换行只是消息内排版（列表/多行内容不拆分）；每个 block 内部再走
+// splitMessagesBlock 按句读软分段，最后统一硬限制到 3 段。
 // CQ 码和 URL 不计入有效字数；拆分点不会落在 CQ 码内部。
 func splitMessages(content string) []string {
 	contentLen := len([]rune(content))
@@ -1404,7 +1405,8 @@ func splitMessages(content string) []string {
 }
 
 // splitMessagesBlock 对单段文本（无空行分隔）做软分段：
-// 总有效字数 ≤60 字原样返回；否则按句号/感叹号/问号/分号/换行拆分，贪心合并到 ≤3 段。
+// 总有效字数 ≤60 字原样返回；否则按句号/感叹号/问号/分号拆分，贪心合并到 ≤3 段。
+// 换行不是拆分点（多行列表/排版整体保留），无断点时整块原样返回。
 func splitMessagesBlock(content string) []string {
 	effectiveLen := func(s string) int {
 		s = cqCodeRegexp.ReplaceAllString(s, "")
@@ -1429,20 +1431,20 @@ func splitMessagesBlock(content string) []string {
 		return false
 	}
 
-	// 按自然断句拆分（。！？；+ 换行），保留分隔符附着在前一段尾部；
+	// 按自然断句拆分（。！？；），保留分隔符附着在前一段尾部；
 	// 跳过 CQ 码内部的断句点。标点断句符后紧跟的 emoji 归入前一段
-	// （emoji 通常修饰前面的句子）；换行是行分隔，不归附 emoji。
-	splitRe := regexp.MustCompile(`[。！？；\n]`)
+	// （emoji 通常修饰前面的句子）。
+	// 换行不是拆分点：多行内容（列表/排版）整体保留在同一条消息内，
+	// 拆分的信号是空行（splitMessages 强分段）与句读。
+	splitRe := regexp.MustCompile(`[。！？；]`)
 	var matches [][]int
 	for _, loc := range splitRe.FindAllStringIndex(content, -1) {
 		if inProtected(loc[0]) {
 			continue
 		}
 		end := loc[1]
-		if content[loc[0]] != '\n' {
-			if m := emojiPrefixRe.FindStringIndex(content[end:]); m != nil {
-				end += m[1]
-			}
+		if m := emojiPrefixRe.FindStringIndex(content[end:]); m != nil {
+			end += m[1]
 		}
 		matches = append(matches, []int{loc[0], end})
 	}
