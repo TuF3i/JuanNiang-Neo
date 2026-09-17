@@ -107,10 +107,10 @@
                   <v-switch v-model="form.llm_review" color="primary" hide-details @change="markDirty" />
                 </div>
                 <div class="d-flex align-center justify-space-between py-1">
-                  <span class="text-body-1">透传最近消息</span>
-                  <v-switch v-model="form.llm_context" color="primary" hide-details @change="markDirty" />
+                  <span class="text-body-1">透传最近消息（条）</span>
+                  <v-text-field v-model.number="form.llm_context_count" type="number" min="0" max="100" density="compact" hide-details style="max-width:140px" @update:model-value="markDirty" />
                 </div>
-                <div class="text-body-2 text-medium-emphasis">开启后 LLM 送审附带该群最近 20 条聊天记录，辅助结合语境判定</div>
+                <div class="text-body-2 text-medium-emphasis">LLM 送审附带该群最近聊天记录，辅助结合语境判定，0=关闭</div>
                 <div class="d-flex align-center ga-2 mt-2">
                   <v-btn color="warning" variant="tonal" prepend-icon="mdi-cancel" @click="openExcludeDialog">排除群设置</v-btn>
                   <v-btn color="primary" variant="tonal" prepend-icon="mdi-shield-plus-outline" @click="openWhitelistDialog">白名单设置</v-btn>
@@ -631,7 +631,7 @@ const tab = ref('overview')
 const form = ref<GroupMgrConfigResp>({
   enabled: false,
   llm_review: true,
-  llm_context: true,
+  llm_context_count: 20,
   black_min_score: 0.7,
   llm_batch_window: 3,
   img_spam_window: 2,
@@ -655,7 +655,7 @@ async function loadConfig() {
     form.value = {
       enabled: res.enabled,
       llm_review: res.llm_review,
-      llm_context: res.llm_context ?? true,
+      llm_context_count: res.llm_context_count ?? 20,
       black_min_score: res.black_min_score ?? 0.7,
       llm_batch_window: res.llm_batch_window ?? 3,
       img_spam_window: res.img_spam_window ?? 2,
@@ -694,7 +694,7 @@ function buildConfigReq() {
   return {
     enabled: f.enabled,
     llm_review: f.llm_review,
-    llm_context: f.llm_context,
+    llm_context_count: Number(f.llm_context_count) || 0,
     black_min_score: Number(f.black_min_score) || 0.7,
     llm_batch_window: Number(f.llm_batch_window) || 3,
     img_spam_window: Number(f.img_spam_window) || 2,
