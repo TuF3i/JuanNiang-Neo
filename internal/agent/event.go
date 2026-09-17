@@ -1382,13 +1382,14 @@ func splitMessages(content string) []string {
 		)
 		out = append(out, sub...)
 	}
-	// 硬限制 3 段：合并尾部多余的段（与 prompt 契约"最多 3 段"一致）
+	// 硬限制 3 段：合并尾部多余的段（与 prompt 契约"最多 3 段"一致），
+	// 合并的两段以换行连接，避免不同语义内容无分隔符直拼
 	mergedCount := 0
 	for len(out) > 3 {
 		last := out[len(out)-1]
 		prev := out[len(out)-2]
 		out = out[:len(out)-2]
-		out = append(out, prev+last)
+		out = append(out, prev+"\n"+last)
 		mergedCount++
 	}
 	if mergedCount > 0 {
@@ -1494,12 +1495,12 @@ func splitMessagesBlock(content string) []string {
 		segments = append(segments, strings.TrimSpace(buf))
 	}
 
-	// 硬限制 3 段：合并尾部多余的段
+	// 硬限制：超 maxSegs 时合并尾部多余的段，以换行连接（避免不同语义内容无分隔符直拼）
 	for len(segments) > maxSegs {
 		last := segments[len(segments)-1]
 		prev := segments[len(segments)-2]
 		segments = segments[:len(segments)-2]
-		segments = append(segments, prev+last)
+		segments = append(segments, prev+"\n"+last)
 	}
 
 	if len(segments) <= 1 {
