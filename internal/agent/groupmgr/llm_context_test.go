@@ -27,7 +27,7 @@ func TestFormatGroupContext(t *testing.T) {
 		ctxMsg(5, 105, "", "只有昵称", "hello"),
 		ctxMsg(6, 106, "", "", "fallback"),
 	}
-	out := formatGroupContext(msgs, pending)
+	out := formatGroupContext(msgs, pending, llmContextCountDefault)
 	wantLines := []string{
 		"[张三(QQ:100)] 多 空格",
 		"[只有昵称(QQ:105)] hello",
@@ -49,15 +49,27 @@ func TestFormatGroupContextTailTruncate(t *testing.T) {
 	for i := 1; i <= 25; i++ {
 		msgs = append(msgs, ctxMsg(int64(i), 1, "", "", "m"+strings.Repeat("x", i%2)))
 	}
-	// 上面构造的偶数/奇数后缀都非空，确保全部有效
-	msgs[0].RawMessage = "mx"
-	out := formatGroupContext(msgs, nil)
+	// 默认条数：尾截 20，保留最近的消息（尾部）
+	out := formatGroupContext(msgs, nil, llmContextCountDefault)
 	lines := strings.Split(out, "\n")
-	if len(lines) != llmContextCount {
-		t.Fatalf("应尾截到 %d 条，实际 %d 条", llmContextCount, len(lines))
+	if len(lines) != llmContextCountDefault {
+		t.Fatalf("应尾截到 %d 条，实际 %d 条", llmContextCountDefault, len(lines))
 	}
 	if !strings.HasPrefix(lines[0], "[QQ1] m") || !strings.HasSuffix(out, "[QQ1] mx") {
 		t.Errorf("应保留最近的消息（尾部），got head=%q tail=%q", lines[0], lines[len(lines)-1])
+	}
+	// 自定义条数：按传入 count 尾截
+	if out := formatGroupContext(msgs, nil, 5); strings.Count(out, "\n") != 4 {
+		t.Errorf("count=5 应输出 5 行，got:\n%s", out)
+	}
+}
+
+func TestContextCountClamp(t *testing.T) {
+	cases := map[int]int{-5: 0, 0: 0, 1: 1, 20: 20, 150: llmContextCountMax}
+	for in, want := range cases {
+		if got := contextCount(in); got != want {
+			t.Errorf("contextCount(%d) = %d, want %d", in, got, want)
+		}
 	}
 }
 
@@ -105,7 +117,10 @@ func TestBatchUserPromptWithoutContext(t *testing.T) {
 
 func TestFetchGroupContextsNilAdapter(t *testing.T) {
 	m := &Manager{}
-	if got := m.fetchGroupContexts(context.Background(), []reviewItem{{groupID: 1}}); got != nil {
+	if got := m.fetchGroupContexts(context.Background(), []reviewItem{{groupID: 1}}, 20); got != nil {
 		t.Errorf("adp 为 nil 应返回 nil，got %v", got)
+	}
+	if got := m.fetchGroupContexts(context.Background(), []reviewItem{{groupID: 1}}, 0); got != nil {
+		t.Errorf("count=0（关闭）应返回 nil，got %v", got)
 	}
 }

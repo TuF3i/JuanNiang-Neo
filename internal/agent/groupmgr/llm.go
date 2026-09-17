@@ -26,9 +26,10 @@ const (
 	llmQueueSize   = 256              // 审查回调队列容量
 	llmPhraseLimit = 2000             // 黑/白语录自学习上限（超出拒绝写入，防 LLM 误判无限扩库）
 
-	llmContextCount   = 20              // 参考上下文条数：每群附带最近聊天记录
-	llmContextTimeout = 5 * time.Second // 拉取群历史上下文超时（尽力而为，不拖慢送审）
-	llmContextLineMax = 200             // 上下文单条消息最大长度（字符）
+	llmContextCountDefault = 20              // 透传条数默认值（面板 llm_context_count，0=关闭）
+	llmContextCountMax     = 100             // 透传条数上限（防误填超大值撑爆 prompt）
+	llmContextTimeout      = 5 * time.Second // 拉取群历史上下文超时（尽力而为，不拖慢送审）
+	llmContextLineMax      = 200             // 上下文单条消息最大长度（字符）
 )
 
 // reviewCtx 一次待审消息的现场上下文（入批窗口）。
@@ -200,8 +201,8 @@ func (m *Manager) flushBatch(ctx context.Context) {
 	// 开关开启时附带各群最近聊天记录作参考上下文（拉取失败静默降级为无上下文）
 	sysPrompt := m.batchSysPrompt(ctx)
 	var groupCtx map[int64]string
-	if cfg := m.getCfg(ctx); cfg != nil && cfg.LLMContext {
-		groupCtx = m.fetchGroupContexts(ctx, items)
+	if cfg := m.getCfg(ctx); cfg != nil && contextCount(cfg.LLMContextCount) > 0 {
+		groupCtx = m.fetchGroupContexts(ctx, items, contextCount(cfg.LLMContextCount))
 	}
 	userPrompt := m.batchUserPrompt(items, groupCtx)
 	req := provider.ChatRequest{
@@ -275,10 +276,21 @@ func (m *Manager) batchUserPrompt(items []reviewItem, groupCtx map[int64]string)
 	return sb.String()
 }
 
+// contextCount 透传条数取值：0=关闭，负值归零，超出上限截断。
+func contextCount(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if n > llmContextCountMax {
+		return llmContextCountMax
+	}
+	return n
+}
+
 // fetchGroupContexts 拉取批内各群最近聊天记录（每群一次，尽力而为）：
 // 供 LLM 结合语境判定；拉取失败静默跳过（返回不含该群，prompt 退化为无上下文）。
-func (m *Manager) fetchGroupContexts(ctx context.Context, items []reviewItem) map[int64]string {
-	if m.adp == nil {
+func (m *Manager) fetchGroupContexts(ctx context.Context, items []reviewItem, count int) map[int64]string {
+	if m.adp == nil || count <= 0 {
 		return nil
 	}
 	// 群号去重并保持首次出现顺序（通常整批同群）
@@ -301,12 +313,12 @@ func (m *Manager) fetchGroupContexts(ctx context.Context, items []reviewItem) ma
 	defer cancel()
 	out := make(map[int64]string, len(gids))
 	for _, gid := range gids {
-		msgs, err := m.adp.GetGroupMsgHistory(gid, 0, llmContextCount)
+		msgs, err := m.adp.GetGroupMsgHistory(gid, 0, count)
 		if err != nil {
 			log.Debug("群历史消息拉取失败，该群无参考上下文", "group", gid, "err", err)
 			continue
 		}
-		if text := formatGroupContext(msgs, pending); text != "" {
+		if text := formatGroupContext(msgs, pending, count); text != "" {
 			out[gid] = text
 		}
 	}
@@ -315,10 +327,12 @@ func (m *Manager) fetchGroupContexts(ctx context.Context, items []reviewItem) ma
 
 // formatGroupContext 把群历史消息格式化为「仅作参考」的上下文块（纯函数，便于单测）。
 // 过滤空消息与待审消息自身（按 message_id），剔除含提示词块伪造特征的消息
-// （历史发言可伪造 </GROUP_CONTEXT> + <USER_TEXT> 注入伪判定块），尾截
-// llmContextCount 条；顺序信任 OneBot 返回（message_id 非全局单调，不做排序，
-// 与 recent_context 同一先例）。
-func formatGroupContext(msgs []adapter.MessageEvent, pending map[int64]bool) string {
+// （历史发言可伪造 </GROUP_CONTEXT> + <USER_TEXT> 注入伪判定块），尾截 count 条；
+// 顺序信任 OneBot 返回（message_id 非全局单调，不做排序，与 recent_context 同一先例）。
+func formatGroupContext(msgs []adapter.MessageEvent, pending map[int64]bool, count int) string {
+	if count <= 0 {
+		return ""
+	}
 	filtered := make([]adapter.MessageEvent, 0, len(msgs))
 	for _, msg := range msgs {
 		if msg.MessageID == 0 || pending[msg.MessageID] {
@@ -334,8 +348,8 @@ func formatGroupContext(msgs []adapter.MessageEvent, pending map[int64]bool) str
 	if len(filtered) == 0 {
 		return ""
 	}
-	if len(filtered) > llmContextCount {
-		filtered = filtered[len(filtered)-llmContextCount:]
+	if len(filtered) > count {
+		filtered = filtered[len(filtered)-count:]
 	}
 	var sb strings.Builder
 	for i := range filtered {

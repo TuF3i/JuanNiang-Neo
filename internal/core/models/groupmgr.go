@@ -43,8 +43,8 @@ type GroupMgrConfig struct {
 	// 到点（秒）或队列满（LLMBatchMax 条）先到先提交
 	LLMBatchWindow int `gorm:"not null;default:3"`
 
-	// LLMContext 送审时附带各群最近聊天记录作参考上下文（条数固定，见 agent/groupmgr）。
-	LLMContext bool `gorm:"not null;default:true"`
+	// LLMContextCount 送审附带各群最近聊天记录条数（0=关闭；默认 20，上限见 agent/groupmgr）。
+	LLMContextCount int `gorm:"not null;default:20"`
 
 	// LLM 审核提示词（三套合并为一份，面板只编辑 LLMPrompt；旧三列保留兼容不再使用）。
 	LLMPrompt         string `gorm:"type:text"`

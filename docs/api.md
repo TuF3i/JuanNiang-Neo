@@ -981,7 +981,7 @@ Plugin 与 Agent 发送消息时，用 `[CQ:image,file=imgs://<id>]` 引用图�
 
 ### GET /group-mgr/config
 
-群管理配置。**data** `GroupMgrConfigResp`: `enabled`、`llm_review`、`black_min_score`（黑名单语录命中阈值，默认 0.7）、`llm_batch_window`（LLM 判定批窗口秒数，默认 3）、`llm_context`（LLM 送审时附带各群最近聊天记录作参考上下文，默认 true）、`exclude_groups`（排除检测的群 ID 列表）、`llm_prompt`（统一检测提示词）。旧字段 `high_score`/`low_score`/`fallback_score`/`llm_criteria`/`llm_gray_prompt`/`llm_high_risk_prompt`/`white_min_score`/`white_gc_interval_days` 已废弃（白名单语录体系已剔除，列保留兼容不再使用）。
+群管理配置。**data** `GroupMgrConfigResp`: `enabled`、`llm_review`、`black_min_score`（黑名单语录命中阈值，默认 0.7）、`llm_batch_window`（LLM 判定批窗口秒数，默认 3）、`llm_context_count`（LLM 送审附带各群最近聊天记录条数，默认 20，0=关闭）、`exclude_groups`（排除检测的群 ID 列表）、`llm_prompt`（统一检测提示词）。旧字段 `high_score`/`low_score`/`fallback_score`/`llm_criteria`/`llm_gray_prompt`/`llm_high_risk_prompt`/`white_min_score`/`white_gc_interval_days` 已废弃（白名单语录体系已剔除，列保留兼容不再使用）。
 
 ### PUT /group-mgr/config
 

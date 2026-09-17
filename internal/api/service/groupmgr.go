@@ -62,12 +62,15 @@ func (s *Service) UpdateGroupMgrConfig(ctx context.Context, c *app.RequestContex
 	}
 	cfg.Enabled = data.Enabled
 	cfg.LLMReview = data.LLMReview
-	cfg.LLMContext = data.LLMContext
 	if data.BlackMinScore > 0 && data.BlackMinScore <= 1 {
 		cfg.BlackMinScore = data.BlackMinScore
 	}
 	if data.LLMBatchWindow > 0 && data.LLMBatchWindow <= 60 {
 		cfg.LLMBatchWindow = data.LLMBatchWindow
+	}
+	// 透传最近消息条数：0=关闭，上限 100（防误填超大值撑爆 prompt）
+	if data.LLMContextCount >= 0 && data.LLMContextCount <= 100 {
+		cfg.LLMContextCount = data.LLMContextCount
 	}
 	// 检测参数（图片刷屏 / 复读 / 惩罚时长），非法值忽略保留原值
 	if data.ImgSpamWindow > 0 {
@@ -452,7 +455,7 @@ func groupMgrConfigResp(cfg *models.GroupMgrConfig) dto.GroupMgrConfigResp {
 	return dto.GroupMgrConfigResp{
 		Enabled: cfg.Enabled, LLMReview: cfg.LLMReview,
 		BlackMinScore:  cfg.BlackMinScore,
-		LLMBatchWindow: cfg.LLMBatchWindow, LLMContext: cfg.LLMContext,
+		LLMBatchWindow: cfg.LLMBatchWindow, LLMContextCount: cfg.LLMContextCount,
 		ImgSpamWindow: cfg.ImgSpamWindow, ImgSpamThreshold: cfg.ImgSpamThreshold, ImgMuteDuration: cfg.ImgMuteDuration,
 		EnableCopyCheck: cfg.EnableCopyCheck, CopyThreshold: cfg.CopyThreshold,
 		ViolationMuteSeconds: cfg.ViolationMuteSeconds,
