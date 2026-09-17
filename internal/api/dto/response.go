@@ -506,6 +506,7 @@ type GroupMgrConfigResp struct {
 	LLMReview            bool     `json:"llm_review"`
 	BlackMinScore        float64  `json:"black_min_score"`  // 黑名单语录命中阈值
 	LLMBatchWindow       int      `json:"llm_batch_window"` // LLM 判定批窗口（秒）
+	LLMContext           bool     `json:"llm_context"`      // 送审附带各群最近聊天记录作参考上下文
 	ImgSpamWindow        int      `json:"img_spam_window"`
 	ImgSpamThreshold     int      `json:"img_spam_threshold"`
 	ImgMuteDuration      int      `json:"img_mute_duration"`
