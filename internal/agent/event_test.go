@@ -114,6 +114,40 @@ func TestSplitMessagesNewlineNoEmojiMerge(t *testing.T) {
 	}
 }
 
+// TestSplitMessagesForceMergeJoinsWithNewline 超 maxSegs 触发尾部强制合并时，
+// 被合并的两段以换行连接，不再无分隔符直拼（避免不同语义内容粘连，如代码后粘上尾缀话术）。
+func TestSplitMessagesForceMergeJoinsWithNewline(t *testing.T) {
+	// 4 个 50 字长句（各带句号）：贪心合并每段已 >60 字无法两两并段，
+	// 得到 4 段，硬限 3 段触发尾部合并
+	sentence := func(r rune) string { return strings.Repeat(string(r), 50) + "。" }
+	content := sentence('甲') + sentence('乙') + sentence('丙') + sentence('丁')
+	parts := splitMessages(content)
+	if len(parts) != 3 {
+		t.Fatalf("应硬限合并为 3 段，实际 %d 段: %q", len(parts), parts)
+	}
+	last := parts[len(parts)-1]
+	if !strings.Contains(last, "\n") {
+		t.Errorf("强制合并的两段应以换行连接: %q", last)
+	}
+	if !strings.Contains(last, "丙") || !strings.Contains(last, "丁") {
+		t.Errorf("被合并段应包含最后两句: %q", last)
+	}
+}
+
+// TestSplitMessagesBlankLineForceMergeJoinsWithNewline 空行强分段超 3 段时，
+// 尾部合并同样以换行连接。
+func TestSplitMessagesBlankLineForceMergeJoinsWithNewline(t *testing.T) {
+	content := "第一段。\n\n第二段。\n\n第三段。\n\n第四段。\n\n第五段。"
+	parts := splitMessages(content)
+	if len(parts) != 3 {
+		t.Fatalf("应硬限合并为 3 段，实际 %d 段: %q", len(parts), parts)
+	}
+	last := parts[len(parts)-1]
+	if !strings.Contains(last, "第三段。\n第四段。\n第五段。") {
+		t.Errorf("尾部合并应以换行连接各段: %q", last)
+	}
+}
+
 // TestGroupEventsByUser 验证按 UserID 分组：不同用户分开、同一用户按原顺序合并。
 func TestGroupEventsByUser(t *testing.T) {
 	ev := func(uid int64) adapter.Event {
