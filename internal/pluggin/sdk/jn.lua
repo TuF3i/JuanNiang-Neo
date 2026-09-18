@@ -82,6 +82,13 @@ M.json = json
 -- onebot11 OneBot11 协议接口 (需要 onebot11 权限)
 -- ====================================================================
 
+-- message 参数两种形态：
+--   1) string：支持 CQ 码，解析类型无关（未知类型如 music 原样透传给 OneBot 实现），
+--      值中的标准转义 &#44;/&#91;/&#93;/&amp; 会自动还原；含逗号/中括号的值请先转义。
+--   2) table：消息段数组 {{type="music", data={...}}}，data 值仅支持 string/number。
+--      音乐卡片等复杂段推荐 table 形态，天然无需转义：
+--       ob.send_group_msg(gid, {{type="music", data={type="custom", url=跳转链接,
+--           audio=音频直链, title=歌名, image=封面, content=歌手}}})
 ---@class jn.OneBot11
 ---@field send_private_msg fun(user_id: number, message: string|table, reply_to?: number): boolean, string? 异步发送私聊消息，不阻塞（reply_to=引用回复的消息ID，可选）
 ---@field send_group_msg fun(group_id: number, message: string|table, reply_to?: number): boolean, string? 异步发送群消息，不阻塞（reply_to=引用回复的消息ID，可选）

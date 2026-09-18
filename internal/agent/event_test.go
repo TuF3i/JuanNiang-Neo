@@ -150,6 +150,20 @@ func TestSplitMessagesBlankLineForceMergeJoinsWithNewline(t *testing.T) {
 	}
 }
 
+// TestParseCQCodeUnescape agent 侧 CQ 码解析同样还原标准转义实体（与 adapter 侧一致）。
+func TestParseCQCodeUnescape(t *testing.T) {
+	seg := parseCQCode("[CQ:music,type=custom,title=晴天&#44;Live,audio=https://e.com/a.mp3]")
+	if seg.Type != "music" {
+		t.Fatalf("类型应为 music, got %s", seg.Type)
+	}
+	if seg.Data["title"] != "晴天,Live" {
+		t.Errorf("title 应反转义逗号, got %q", seg.Data["title"])
+	}
+	if seg.Data["audio"] != "https://e.com/a.mp3" {
+		t.Errorf("audio 不应变, got %q", seg.Data["audio"])
+	}
+}
+
 // TestGroupEventsByUser 验证按 UserID 分组：不同用户分开、同一用户按原顺序合并。
 func TestGroupEventsByUser(t *testing.T) {
 	ev := func(uid int64) adapter.Event {
