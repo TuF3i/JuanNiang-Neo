@@ -51,6 +51,20 @@ func Video(file string) Segment {
 	return Segment{Type: "video", Data: map[string]any{"file": file}}
 }
 
+// Music 音乐自定义分享卡片。url 为点击跳转地址，audio 为音频直链，title 必填；
+// image（封面 URL）、content（歌手/副标题）可传空串省略。
+// 最终渲染形态取决于 OneBot 实现端（NapCat/SnowLuma 等经签卡服务生成 JSON 卡片）。
+func Music(url, audio, title, image, content string) Segment {
+	data := map[string]any{"type": "custom", "url": url, "audio": audio, "title": title}
+	if image != "" {
+		data["image"] = image
+	}
+	if content != "" {
+		data["content"] = content
+	}
+	return Segment{Type: "music", Data: data}
+}
+
 // Reply 回复消息。id 为被回复的消息 ID。
 func Reply(id string) Segment {
 	return Segment{Type: "reply", Data: map[string]any{"id": id}}
@@ -222,6 +236,12 @@ func (b *MessageBuilder) Video(file string) *MessageBuilder {
 	return b
 }
 
+// Music 音乐自定义分享卡片（image/content 可传空串省略）。
+func (b *MessageBuilder) Music(url, audio, title, image, content string) *MessageBuilder {
+	b.segments = append(b.segments, Music(url, audio, title, image, content))
+	return b
+}
+
 func (b *MessageBuilder) Reply(id string) *MessageBuilder {
 	b.segments = append(b.segments, Reply(id))
 	return b
@@ -243,13 +263,23 @@ func (b *MessageBuilder) Build() []Segment {
 	return b.segments
 }
 
+// UnescapeCQValue 还原 CQ 码参数值中的标准转义实体（OneBot11 约定）：
+// &#44; → ,　&#91; → [　&#93; → ]　&amp; → &
+// &amp; 必须最后处理，避免 "&amp;#44;" 这类字面量被二次还原。
+func UnescapeCQValue(s string) string {
+	s = strings.ReplaceAll(s, "&#44;", ",")
+	s = strings.ReplaceAll(s, "&#91;", "[")
+	s = strings.ReplaceAll(s, "&#93;", "]")
+	return strings.ReplaceAll(s, "&amp;", "&")
+}
+
 func parseCQArgs(s string) map[string]string {
 	args := make(map[string]string)
 	s = strings.TrimPrefix(s, ",")
 	for _, part := range strings.Split(s, ",") {
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) == 2 {
-			args[strings.TrimSpace(kv[0])] = kv[1]
+			args[strings.TrimSpace(kv[0])] = UnescapeCQValue(kv[1])
 		}
 	}
 	return args

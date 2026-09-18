@@ -86,3 +86,67 @@ func segments2str(segs []Segment) string {
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
 }
+
+// TestParseCQCodesMusic 验证 music CQ 码（类型无关透传）能原样解析为消息段。
+func TestParseCQCodesMusic(t *testing.T) {
+	raw := "[CQ:music,type=custom,url=https://e.com/song,audio=https://e.com/a.mp3,title=晴天]"
+	segs := ParseCQCodes(raw)
+	if len(segs) != 1 {
+		t.Fatalf("期望 1 个消息段, got %d: %s", len(segments2str(segs)), segments2str(segs))
+	}
+	seg := segs[0]
+	if seg.Type != "music" {
+		t.Fatalf("类型应为 music, got %s", seg.Type)
+	}
+	for k, want := range map[string]string{
+		"type": "custom", "url": "https://e.com/song",
+		"audio": "https://e.com/a.mp3", "title": "晴天",
+	} {
+		if seg.Data[k] != want {
+			t.Errorf("data[%s] = %v, want %q", k, seg.Data[k], want)
+		}
+	}
+}
+
+// TestParseCQArgsUnescape 验证 CQ 参数值的标准转义实体被还原（含逗号的值不再被截断）。
+func TestParseCQArgsUnescape(t *testing.T) {
+	raw := "[CQ:music,type=custom,title=歌名&#44; Live,audio=https://e.com/a&#91;1&#93;.mp3,content=A&amp;B]"
+	segs := ParseCQCodes(raw)
+	if len(segs) != 1 || segs[0].Type != "music" {
+		t.Fatalf("期望单个 music 段, got %s", segments2str(segs))
+	}
+	data := segs[0].Data
+	if data["title"] != "歌名, Live" {
+		t.Errorf("title 应反转义为逗号, got %q", data["title"])
+	}
+	if data["audio"] != "https://e.com/a[1].mp3" {
+		t.Errorf("audio 应反转义中括号, got %q", data["audio"])
+	}
+	if data["content"] != "A&B" {
+		t.Errorf("content 应反转义 &amp;, got %q", data["content"])
+	}
+}
+
+// TestMusicSegment 验证 Music 构造器：可选字段为空时不出现在 data 中。
+func TestMusicSegment(t *testing.T) {
+	seg := Music("https://e.com", "https://e.com/a.mp3", "晴天", "", "")
+	if seg.Type != "music" || seg.Data["type"] != "custom" {
+		t.Fatalf("基础字段不符: %+v", seg)
+	}
+	for _, k := range []string{"url", "audio", "title"} {
+		if seg.Data[k] == "" {
+			t.Errorf("data[%s] 不应为空", k)
+		}
+	}
+	if _, ok := seg.Data["image"]; ok {
+		t.Errorf("空 image 不应出现在 data: %+v", seg.Data)
+	}
+	if _, ok := seg.Data["content"]; ok {
+		t.Errorf("空 content 不应出现在 data: %+v", seg.Data)
+	}
+
+	full := Music("https://e.com", "https://e.com/a.mp3", "晴天", "https://e.com/cover.jpg", "周杰伦")
+	if full.Data["image"] != "https://e.com/cover.jpg" || full.Data["content"] != "周杰伦" {
+		t.Errorf("image/content 应保留: %+v", full.Data)
+	}
+}

@@ -273,6 +273,22 @@ jn.onebot11.send_group_msg(123456, {
 - `base64://` → 直接透传
 - 相对路径（如 `img/photo.png`）→ 从插件目录自动读取并转 base64
 
+**音乐卡片**：CQ 解析对类型无白名单，未知类型（如 `music`）会原样透传给 OneBot 实现端渲染。字符串形态的参数值需按 OneBot 约定转义（`, → &#44;`、`[ → &#91;`、`] → &#93;`，解析时自动还原），含逗号/中括号的值推荐直接用 table 形态免转义：
+
+```lua
+-- 自定义音乐卡片（推荐 table 形态；是否渲染成卡片取决于 OneBot 实现端）
+jn.onebot11.send_group_msg(123456, {
+    { type = "music", data = {
+        type = "custom",
+        url = "https://example.com/song",        -- 点击跳转
+        audio = "https://example.com/song.mp3",  -- 音频直链
+        title = "歌名",
+        image = "https://example.com/cover.jpg", -- 封面（可选）
+        content = "歌手",                        -- 副标题（可选）
+    } },
+})
+```
+
 ### 群信息查询
 
 | 函数 | 返回 |

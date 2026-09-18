@@ -1333,6 +1333,7 @@ func parseCQToSegments(content string) []adapter.Segment {
 
 // parseCQCode 解析单个 CQ 码字符串为 Segment。
 // 例如: "[CQ:image,file=http://example.com/img.jpg]" → {Type: "image", Data: {"file": "http://..."}}
+// 参数值做 CQ 实体反转义（&#44;/&#91;/&#93;/&amp;），与 adapter 侧 parseCQArgs 行为一致。
 func parseCQCode(s string) adapter.Segment {
 	// 去掉 [CQ: 和 ]
 	inner := s[4 : len(s)-1] // "image,file=http://..."
@@ -1343,7 +1344,7 @@ func parseCQCode(s string) adapter.Segment {
 		for _, kv := range strings.Split(parts[1], ",") {
 			eq := strings.IndexByte(kv, '=')
 			if eq > 0 {
-				data[kv[:eq]] = kv[eq+1:]
+				data[kv[:eq]] = adapter.UnescapeCQValue(kv[eq+1:])
 			}
 		}
 	}
