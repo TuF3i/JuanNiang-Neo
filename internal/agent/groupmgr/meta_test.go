@@ -123,3 +123,24 @@ func TestSyncAdminsFromAdapter(t *testing.T) {
 		t.Error("同步后 200 应视为管理员")
 	}
 }
+
+// TestPunishMarksReviewVerdict 直罚（RAG/关键词/刷屏/复读）也必须登记审核终态：
+// 否则 ReviewGate 查不到 black，处罚后针对该消息的 Agent 回复仍会发出
+// （线上事故：RAG 处罚 warn 已执行，review_gate blocked=false，回复照发）。
+func TestPunishMarksReviewVerdict(t *testing.T) {
+	m, _ := newTestManager(t, nil)
+	ctx := context.Background()
+	ev := groupEv(619463411, 2706880859, "别给卷娘玩亖了")
+
+	m.punish(ctx, ev, "RAG语义核实(敏感内容)", "sensitive", "rag")
+
+	blocked, pending := m.ReviewGate(ctx, 619463411, 2706880859, 2706880859)
+	if !blocked || pending {
+		t.Fatalf("处罚后应 blocked=true pending=false, got blocked=%v pending=%v", blocked, pending)
+	}
+
+	// 顺带登记了送审去重（10 分钟后与终态一并过期）
+	if _, ok := m.llmReviewed[2706880859]; !ok {
+		t.Fatal("处罚应顺带登记送审去重")
+	}
+}

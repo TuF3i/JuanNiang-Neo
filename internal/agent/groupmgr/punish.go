@@ -89,6 +89,19 @@ func (m *Manager) punish(ctx context.Context, ev adapter.Event, reason, category
 	groupID := ev.Message.GroupID
 	userID := ev.Message.UserID
 
+	// 违规即终态：登记 black 供发送前闸门（ReviewGate）拦截针对该消息的 Agent 回复。
+	// RAG/关键词/刷屏/复读等直罚路径不经 LLM applyVerdict，必须在此登记，
+	// 否则处罚后 Agent 回复仍会发出（对一条已被撤回的违规消息作了回复）。
+	// 顺带登记送审去重（10 分钟内同一消息不重复送审），并随既有清理机制一并过期。
+	if msg := ev.Message; msg != nil && msg.MessageID != 0 {
+		m.llmMu.Lock()
+		m.reviewVerdict[msg.MessageID] = "black"
+		if _, ok := m.llmReviewed[msg.MessageID]; !ok {
+			m.llmReviewed[msg.MessageID] = time.Now().Unix()
+		}
+		m.llmMu.Unlock()
+	}
+
 	// 提前声明供 span defer 闭包引用（词法作用域限制）
 	var (
 		count  int
